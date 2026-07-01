@@ -67,18 +67,23 @@ function renderHome() {
             <span></span>
           </div>
           <div>
-            <p class="eyebrow">Peer-to-peer match room</p>
+            <p class="eyebrow">TIFO Living Terrace</p>
             <h1 id="home-title">TIFO</h1>
           </div>
         </div>
         <p class="tagline">Build the terrace. Preserve the echo.</p>
+        <div class="feature-row" aria-label="TIFO principles">
+          <span>Fan owned</span>
+          <span>No accounts</span>
+          <span>Peer first</span>
+        </div>
         <div class="status-grid" aria-label="App status">
           <div>
-            <span class="status-label">Runtime</span>
+            <span class="status-label">Pear worker</span>
             <strong>${escapeHtml(state.workerStatus)}</strong>
           </div>
           <div>
-            <span class="status-label">Network</span>
+            <span class="status-label">P2P room</span>
             <strong>Not connected</strong>
           </div>
           <div>
@@ -91,7 +96,8 @@ function renderHome() {
       <section class="join-panel" aria-labelledby="join-title">
         <div class="panel-heading">
           <p class="eyebrow">Join room</p>
-          <h2 id="join-title">Match terrace</h2>
+          <h2 id="join-title">Enter a match room</h2>
+          <p class="panel-copy">Start with a local terrace preview. P2P sync comes next.</p>
         </div>
         <form id="join-form" class="join-form">
           <label>
@@ -121,10 +127,11 @@ function renderHome() {
           <button class="primary-action" type="submit">Enter terrace</button>
         </form>
         <div class="fixture-preview">
+          <span class="fixture-label">Demo fixture</span>
           <span class="fixture-team">MAR</span>
           <span class="fixture-divider">vs</span>
           <span class="fixture-team muted">OPP</span>
-          <span class="fixture-round">Demo room</span>
+          <span class="fixture-round">R16</span>
         </div>
       </section>
     </main>
@@ -180,7 +187,7 @@ function renderRoom() {
         <div class="brand-mini">
           <div class="tifo-mark small" aria-hidden="true"><span></span></div>
           <div>
-            <p class="eyebrow">TIFO Living Terrace</p>
+            <p class="eyebrow">Local terrace preview</p>
             <h1>${escapeHtml(state.roomTitle)}</h1>
           </div>
         </div>
@@ -211,7 +218,10 @@ function renderRoom() {
       <section class="room-grid">
         <section class="chat-surface" aria-labelledby="chat-title">
           <div class="section-heading">
-            <h2 id="chat-title">Terrace chat</h2>
+            <div>
+              <h2 id="chat-title">Terrace chat</h2>
+              <p>Messages stay local in Phase 1.</p>
+            </div>
             <span class="local-pill">Local only</span>
           </div>
           <div class="chat-list" id="chat-list">
@@ -230,7 +240,10 @@ function renderRoom() {
 
         <aside class="controls-surface" aria-labelledby="controls-title">
           <div class="section-heading">
-            <h2 id="controls-title">Match controls</h2>
+            <div>
+              <h2 id="controls-title">Match controls</h2>
+              <p>Build the moment.</p>
+            </div>
           </div>
           <div class="reaction-grid">
             ${reactionTypes
@@ -263,7 +276,10 @@ function renderRoom() {
 
         <section class="timeline-surface" aria-labelledby="timeline-title">
           <div class="section-heading">
-            <h2 id="timeline-title">Echo timeline</h2>
+            <div>
+              <h2 id="timeline-title">Echo timeline</h2>
+              <p>Preview of the shared memory layer.</p>
+            </div>
             <span>${state.events.length} events</span>
           </div>
           <ol class="timeline-list">

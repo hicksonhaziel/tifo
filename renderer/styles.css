@@ -11,6 +11,7 @@
   --red-dark: #8f1f1c;
   --white-soft: #e1e1e1;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  --radius: 8px;
 }
 
 * {
@@ -28,7 +29,8 @@ body {
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 8%, rgba(229, 57, 53, 0.2), transparent 28%),
+    radial-gradient(circle at 18% 8%, rgba(229, 57, 53, 0.16), transparent 30%),
+    radial-gradient(circle at 84% 14%, rgba(255, 255, 255, 0.06), transparent 24%),
     linear-gradient(135deg, #101010 0%, #050505 48%, #151515 100%);
   color: var(--text);
   font-family:
@@ -63,7 +65,7 @@ button {
 
 .home-view {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.72fr);
+  grid-template-columns: minmax(0, 1fr) minmax(390px, 0.56fr);
   gap: 24px;
   padding: 32px;
 }
@@ -74,6 +76,7 @@ button {
 .controls-surface,
 .timeline-surface {
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: rgba(18, 18, 18, 0.9);
   box-shadow: var(--shadow);
 }
@@ -90,6 +93,8 @@ button {
 .brand-panel {
   position: relative;
   overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(229, 57, 53, 0.08), transparent 36%), rgba(18, 18, 18, 0.92);
 }
 
 .brand-panel::after {
@@ -185,7 +190,7 @@ p {
 }
 
 .brand-lockup h1 {
-  font-size: clamp(58px, 9vw, 116px);
+  font-size: clamp(64px, 9vw, 128px);
   line-height: 0.9;
 }
 
@@ -193,10 +198,28 @@ p {
   position: relative;
   max-width: 680px;
   color: var(--white-soft);
-  font-size: clamp(28px, 4vw, 56px);
+  font-size: clamp(30px, 4vw, 58px);
   font-weight: 800;
   line-height: 1.03;
   z-index: 1;
+}
+
+.feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.feature-row span {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--white-soft);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 8px 11px;
 }
 
 .status-grid,
@@ -205,6 +228,7 @@ p {
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--line);
 }
 
@@ -233,6 +257,14 @@ p {
 .section-heading h2 {
   margin-top: 4px;
   font-size: 24px;
+}
+
+.panel-copy,
+.section-heading p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .join-form {
@@ -278,7 +310,8 @@ input:focus {
 }
 
 .primary-action {
-  background: var(--red);
+  background: linear-gradient(135deg, var(--red), #b72b28);
+  box-shadow: 0 12px 30px rgba(229, 57, 53, 0.2);
 }
 
 .ghost-action {
@@ -287,12 +320,32 @@ input:focus {
   padding: 0 16px;
 }
 
+.primary-action:hover,
+.chat-form button:hover,
+.replay-action:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ghost-action:hover,
+.reaction-button:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .fixture-preview {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--line);
   padding-top: 24px;
+}
+
+.fixture-label {
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .fixture-team {
@@ -330,6 +383,7 @@ input:focus {
   justify-content: space-between;
   gap: 16px;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: rgba(8, 8, 8, 0.82);
   padding: 16px;
 }
@@ -343,7 +397,7 @@ input:focus {
 }
 
 .match-strip {
-  grid-template-columns: 1fr 0.6fr 0.9fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 0.55fr 0.8fr minmax(0, 1fr);
 }
 
 .room-grid {
@@ -425,7 +479,7 @@ input:focus {
 }
 
 .chat-form button {
-  background: var(--red);
+  background: linear-gradient(135deg, var(--red), #b72b28);
   padding: 0 18px;
 }
 

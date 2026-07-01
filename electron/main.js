@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -114,8 +114,12 @@ function getWorker(specifier) {
 
 async function createWindow() {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1180,
+    height: 760,
+    minWidth: 960,
+    minHeight: 640,
+    backgroundColor: '#090909',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'electron', 'preload.js'),
       sandbox: true,
@@ -123,6 +127,7 @@ async function createWindow() {
       contextIsolation: true
     }
   })
+  win.setMenuBarVisibility(false)
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL
 
@@ -176,6 +181,7 @@ function handleDeepLink(url) {
 }
 
 app.setAsDefaultProtocolClient(protocol)
+Menu.setApplicationMenu(null)
 
 app.on('open-url', (evt, url) => {
   evt.preventDefault()
