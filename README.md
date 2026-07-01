@@ -4,6 +4,8 @@ TIFO is a peer-to-peer living terrace for football fans, built on the Pear stack
 
 This repo currently starts from the official Pear Electron starter and will be shaped into the TIFO app described in `PLAN.md`.
 
+Built from the official Pear Electron starter by Holepunch.
+
 ## Development
 
 Install dependencies:
