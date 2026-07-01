@@ -120,6 +120,7 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: '#090909',
     autoHideMenuBar: true,
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '..', 'electron', 'preload.js'),
       sandbox: true,

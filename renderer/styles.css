@@ -116,6 +116,21 @@ button {
   gap: 18px;
 }
 
+.brand-logo-image {
+  display: block;
+  width: min(620px, 74vw);
+  max-height: 170px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.brand-icon-image {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
 .tifo-mark {
   position: relative;
   width: 96px;
@@ -190,7 +205,7 @@ p {
 }
 
 .brand-lockup h1 {
-  font-size: clamp(64px, 9vw, 128px);
+  font-size: 0;
   line-height: 0.9;
 }
 

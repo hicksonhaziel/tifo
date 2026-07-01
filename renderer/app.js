@@ -63,12 +63,15 @@ function renderHome() {
     <main class="home-view">
       <section class="brand-panel" aria-labelledby="home-title">
         <div class="brand-lockup">
-          <div class="tifo-mark" aria-hidden="true">
-            <span></span>
-          </div>
           <div>
             <p class="eyebrow">TIFO Living Terrace</p>
-            <h1 id="home-title">TIFO</h1>
+            <h1 id="home-title">
+              <img
+                class="brand-logo-image"
+                src="../assets/brand/transparent/tifo-primary-lockup.png"
+                alt="TIFO"
+              />
+            </h1>
           </div>
         </div>
         <p class="tagline">Build the terrace. Preserve the echo.</p>
@@ -185,7 +188,11 @@ function renderRoom() {
     <main class="room-view">
       <header class="room-header">
         <div class="brand-mini">
-          <div class="tifo-mark small" aria-hidden="true"><span></span></div>
+          <img
+            class="brand-icon-image"
+            src="../assets/brand/icon/tifo-app-icon.png"
+            alt=""
+          />
           <div>
             <p class="eyebrow">Local terrace preview</p>
             <h1>${escapeHtml(state.roomTitle)}</h1>
