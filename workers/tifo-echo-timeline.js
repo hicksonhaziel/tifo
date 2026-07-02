@@ -6,6 +6,7 @@ class TifoEchoTimeline {
   constructor(store) {
     this.store = store.namespace('tifo-echo')
     this.base = null
+    this.metaCore = null
     this.roomCode = null
     this.appendQueue = Promise.resolve()
     this.pendingRecords = []
@@ -21,9 +22,50 @@ class TifoEchoTimeline {
 
     this.roomCode = roomCode
     this.onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : noop
-    await this.openBase(null)
+    await this.openRoomMeta()
+    await this.openBase(await this.readSavedBaseKey())
+    await this.saveRoomBaseKey(this.baseKey)
 
     return this.readAll()
+  }
+
+  async openRoomMeta() {
+    this.metaCore = this.store.get({
+      name: roomMetaName(this.roomCode),
+      valueEncoding: 'json'
+    })
+    await this.metaCore.ready()
+  }
+
+  async readSavedBaseKey() {
+    const core = this.metaCore
+    if (!core) return null
+
+    for (let index = core.length - 1; index >= 0; index -= 1) {
+      const record = await core.get(index, { wait: false })
+      const baseKey = normalizeKeyHex(record?.baseKey)
+      if (record?.room === this.roomCode && record?.type === 'room:base' && baseKey) {
+        return baseKey
+      }
+    }
+
+    return null
+  }
+
+  async saveRoomBaseKey(baseKey) {
+    const nextBaseKey = normalizeKeyHex(baseKey)
+    if (!this.metaCore || !this.roomCode || !nextBaseKey) return
+
+    const previousBaseKey = await this.readSavedBaseKey()
+    if (previousBaseKey === nextBaseKey) return
+
+    await this.metaCore.append({
+      type: 'room:base',
+      room: this.roomCode,
+      baseKey: nextBaseKey,
+      savedAt: Date.now(),
+      version: 1
+    })
   }
 
   async openBase(bootstrapKey) {
@@ -90,6 +132,7 @@ class TifoEchoTimeline {
     const previousEvents = await this.readAll()
     await this.closeBase()
     await this.openBase(nextBaseKey)
+    await this.saveRoomBaseKey(nextBaseKey)
 
     for (const event of previousEvents) this.queueRecord(eventRecord(event))
     await this.flushPendingRecords()
@@ -168,7 +211,9 @@ class TifoEchoTimeline {
   async closeRoom() {
     this.generation++
     await this.closeBase()
+    if (this.metaCore?.close) await this.metaCore.close()
     this.roomCode = null
+    this.metaCore = null
     this.pendingRecords = []
     this.replicationMuxes.clear()
     this.knownWriterKeys.clear()
@@ -237,6 +282,13 @@ function eventRecord(event) {
 
 function roomNamespace(roomCode) {
   return b4a.toString(crypto.namespace(`tifo-echo:${roomCode.trim().toUpperCase()}`, 1)[0], 'hex')
+}
+
+function roomMetaName(roomCode) {
+  return b4a.toString(
+    crypto.namespace(`tifo-echo-meta:${roomCode.trim().toUpperCase()}`, 1)[0],
+    'hex'
+  )
 }
 
 function normalizeKey(key) {

@@ -22,10 +22,18 @@ const state = {
   },
   replayPreview: {
     active: false,
+    activeEventId: '',
+    anchorId: '',
+    anchorLabel: '',
+    cueCount: 0,
+    cues: [],
     detail: '',
     error: '',
+    mode: 'idle',
+    messages: [],
     progress: 0,
-    title: ''
+    title: '',
+    windowLabel: ''
   },
   effects: [],
   seenEffectEventIds: new Set(),
@@ -51,13 +59,20 @@ const pendingChantUrls = new Map()
 const CHANT_MIN_MS = 3000
 const CHANT_MAX_MS = 10000
 const FALLBACK_CHANT_MS = 3600
+const REPLAY_WINDOW_BEFORE_MS = 5000
+const REPLAY_WINDOW_AFTER_MS = 25000
+const REPLAY_DURATION_MS = 12000
+const REPLAY_MIN_STEP_MS = 520
 let activeChantRecorder = null
 let activeChantStream = null
 let discardActiveChant = false
 let chantTickTimer = null
 let chantAutoStopTimer = null
 let activeReplayAudio = null
+let activeReplaySession = null
 let fallbackChantUrl = ''
+let replayProgressTimer = null
+let replayStartedAt = 0
 let replayTimers = []
 
 function reactionTheme(type) {
@@ -227,16 +242,26 @@ function eventListSignature(events) {
 function replayIdleState() {
   return {
     active: false,
+    activeEventId: '',
+    anchorId: '',
+    anchorLabel: '',
+    cueCount: 0,
+    cues: [],
     detail: '',
     error: '',
+    mode: 'idle',
+    messages: [],
     progress: 0,
-    title: ''
+    title: '',
+    windowLabel: ''
   }
 }
 
 function clearReplayTimers() {
   for (const timer of replayTimers) clearTimeout(timer)
   replayTimers = []
+  if (replayProgressTimer) clearInterval(replayProgressTimer)
+  replayProgressTimer = null
 }
 
 function stopActiveReplayAudio() {
@@ -249,6 +274,8 @@ function stopActiveReplayAudio() {
 function resetReplayPreview(options = {}) {
   clearReplayTimers()
   stopActiveReplayAudio()
+  activeReplaySession = null
+  replayStartedAt = 0
   state.replayPreview = replayIdleState()
   if (options.renderAfter && state.view === 'room') render()
 }
@@ -259,6 +286,16 @@ function scheduleReplayStep(callback, delay) {
     callback()
   }, delay)
   replayTimers.push(timer)
+}
+
+function updateReplayProgress(progress) {
+  state.replayPreview = {
+    ...state.replayPreview,
+    progress
+  }
+
+  const progressBar = document.querySelector('.replay-progress span')
+  if (progressBar) progressBar.style.width = `${progress}%`
 }
 
 function resolvePendingChantLoad(eventId, dataUrl = '') {
@@ -349,6 +386,9 @@ function applyWorkerMessage(message) {
     case 'chant:loaded':
       chantAudioUrls.set(message.eventId, message.dataUrl)
       resolvePendingChantLoad(message.eventId, message.dataUrl)
+      break
+    case 'echo:replay':
+      shouldRender = false
       break
     case 'error':
       state.lastError = message.message || 'Worker error'
@@ -517,62 +557,190 @@ async function playChantForReplay(event) {
   await playAudioUrl(audioUrl || getFallbackChantUrl())
 }
 
-function startReplayEchoPreview() {
-  const items = roomMetrics().playableEvents.slice(0, 10).reverse()
-  if (items.length === 0) return
-
-  resetReplayPreview()
-  state.replayPreview = {
-    active: true,
-    detail: `${items.length} terrace events queued`,
-    error: '',
-    progress: 0,
-    title: 'Replay Echo'
-  }
-  render()
-  scheduleReplayStep(() => playReplayItem(items, 0), 180)
+function replayEventsChronological() {
+  return state.events
+    .filter((event) => event.type !== 'system')
+    .slice()
+    .sort((left, right) => left.timestamp - right.timestamp)
 }
 
-function playReplayItem(items, index) {
-  if (state.view !== 'room') return
+function chooseReplayAnchor(anchorId = '') {
+  const events = replayEventsChronological()
+  if (anchorId) return events.find((event) => event.id === anchorId) || null
 
-  if (index >= items.length) {
-    state.replayPreview = {
-      active: true,
-      detail: 'Local Echo preview finished',
-      error: '',
-      progress: 100,
-      title: 'Echo complete'
+  return (
+    events
+      .slice()
+      .reverse()
+      .find(
+        (event) => event.type === 'reaction' && ['goal', 'flare'].includes(event.payload?.type)
+      ) ||
+    events.at(-1) ||
+    null
+  )
+}
+
+function formatReplayOffset(ms) {
+  if (Math.abs(ms) < 500) return 'Moment'
+  const seconds = Math.round(ms / 1000)
+  return seconds > 0 ? `+${seconds}s` : `${seconds}s`
+}
+
+function replayToneForEvent(event) {
+  if (event.type === 'reaction') return reactionTheme(event.payload.type).tone
+  if (event.type === 'chant') return 'cold'
+  if (event.type === 'chat') return 'clean'
+  return 'warning'
+}
+
+function replayCueForEvent(event, anchor, replayStart, replayWindowMs, index) {
+  const meta = eventMeta(event)
+  const atMs = Math.max(
+    0,
+    Math.min(
+      REPLAY_DURATION_MS,
+      Math.round(((event.timestamp - replayStart) / replayWindowMs) * REPLAY_DURATION_MS)
+    )
+  )
+
+  return {
+    atMs,
+    event,
+    id: event.id,
+    index,
+    label: meta.label,
+    offset: formatReplayOffset(event.timestamp - anchor.timestamp),
+    sender: event.sender,
+    text: meta.text,
+    tone: replayToneForEvent(event),
+    type: event.type
+  }
+}
+
+function buildReplaySession(anchorId = '') {
+  const anchor = chooseReplayAnchor(anchorId)
+  if (!anchor) return null
+
+  const replayStart = anchor.timestamp - REPLAY_WINDOW_BEFORE_MS
+  const replayEnd = anchor.timestamp + REPLAY_WINDOW_AFTER_MS
+  const replayWindowMs = replayEnd - replayStart
+  const windowEvents = replayEventsChronological().filter(
+    (event) => event.timestamp >= replayStart && event.timestamp <= replayEnd
+  )
+  const sourceEvents = windowEvents.length > 0 ? windowEvents : [anchor]
+  const cues = sourceEvents
+    .map((event, index) => replayCueForEvent(event, anchor, replayStart, replayWindowMs, index))
+    .sort((left, right) => left.atMs - right.atMs || left.index - right.index)
+
+  for (let index = 1; index < cues.length; index += 1) {
+    const previous = cues[index - 1]
+    const cue = cues[index]
+    if (cue.atMs - previous.atMs < REPLAY_MIN_STEP_MS) {
+      cue.atMs = Math.min(REPLAY_DURATION_MS - 300, previous.atMs + REPLAY_MIN_STEP_MS)
     }
+  }
+
+  const anchorMeta = eventMeta(anchor)
+
+  return {
+    anchor,
+    anchorLabel: `${anchorMeta.label} by ${anchor.sender}`,
+    cues,
+    durationMs: Math.max(REPLAY_DURATION_MS, cues.at(-1)?.atMs + 1200 || REPLAY_DURATION_MS),
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    windowLabel: `${formatReplayOffset(-REPLAY_WINDOW_BEFORE_MS)} to ${formatReplayOffset(REPLAY_WINDOW_AFTER_MS)}`
+  }
+}
+
+function startReplayProgress(session) {
+  replayStartedAt = Date.now()
+  if (replayProgressTimer) clearInterval(replayProgressTimer)
+  replayProgressTimer = setInterval(() => {
+    if (activeReplaySession !== session.id) return
+    const elapsed = Date.now() - replayStartedAt
+    updateReplayProgress(Math.min(99, Math.round((elapsed / session.durationMs) * 100)))
+  }, 220)
+}
+
+function startReplayEcho(anchorId = '') {
+  const session = buildReplaySession(anchorId)
+  if (!session) {
+    state.lastError = 'Add a goal, reaction, chat, or chant before replaying Echo'
     render()
-    scheduleReplayStep(() => resetReplayPreview({ renderAfter: true }), 2600)
     return
   }
 
-  const event = items[index]
-  const meta = eventMeta(event)
-  const progress = Math.round(((index + 1) / items.length) * 100)
-
-  state.replayPreview = {
-    active: true,
-    detail: `${event.sender}: ${meta.text}`,
-    error:
-      event.type === 'chant' && !chantAudioUrls.has(event.id)
-        ? 'Using local file or demo chant'
-        : '',
-    progress,
-    title: meta.label
+  for (const cue of session.cues) {
+    if (cue.type === 'chant') prefetchChantAudio(cue.event)
   }
 
-  if (event.type === 'reaction') {
+  resetReplayPreview()
+  activeReplaySession = session.id
+  state.lastError = ''
+  state.replayPreview = {
+    ...replayIdleState(),
+    active: true,
+    anchorId: session.anchor.id,
+    anchorLabel: session.anchorLabel,
+    cueCount: session.cues.length,
+    cues: session.cues.map((cue) => ({
+      id: cue.id,
+      label: cue.label,
+      offset: cue.offset,
+      tone: cue.tone,
+      type: cue.type
+    })),
+    detail: `${session.cues.length} events queued around ${session.anchorLabel}`,
+    mode: 'running',
+    title: 'Replay Echo',
+    windowLabel: session.windowLabel
+  }
+  startReplayProgress(session)
+
+  for (const cue of session.cues) {
+    scheduleReplayStep(() => activateReplayCue(session, cue), cue.atMs)
+  }
+
+  scheduleReplayStep(() => finishReplaySession(session), session.durationMs + 650)
+  render()
+}
+
+function activateReplayCue(session, cue) {
+  if (activeReplaySession !== session.id || state.view !== 'room') return
+
+  state.replayPreview = {
+    ...state.replayPreview,
+    activeEventId: cue.id,
+    detail: `${cue.offset} · ${cue.sender}: ${cue.text}`,
+    error:
+      cue.type === 'chant' && !chantAudioUrls.has(cue.id)
+        ? 'Loading chant audio or using fallback'
+        : '',
+    messages: [
+      {
+        id: `${session.id}-${cue.id}-${Date.now()}`,
+        label: cue.label,
+        offset: cue.offset,
+        sender: cue.sender,
+        text: cue.text,
+        tone: cue.tone,
+        type: cue.type
+      },
+      ...state.replayPreview.messages
+    ].slice(0, 5),
+    title: cue.label
+  }
+
+  if (cue.type === 'reaction') {
     triggerReactionEffect({
-      ...event,
-      id: `replay-${event.id}-${index}-${Date.now()}`
+      ...cue.event,
+      id: `replay-${cue.id}-${Date.now()}`
     })
   }
 
-  if (event.type === 'chant') {
-    playChantForReplay(event).catch(() => {
+  if (cue.type === 'chant') {
+    playChantForReplay(cue.event).catch(() => {
+      if (activeReplaySession !== session.id) return null
       state.replayPreview = {
         ...state.replayPreview,
         error: 'Replay audio fell back to demo chant'
@@ -583,7 +751,24 @@ function playReplayItem(items, index) {
   }
 
   render()
-  scheduleReplayStep(() => playReplayItem(items, index + 1), event.type === 'chant' ? 2300 : 1200)
+}
+
+function finishReplaySession(session) {
+  if (activeReplaySession !== session.id) return
+  if (replayProgressTimer) clearInterval(replayProgressTimer)
+  replayProgressTimer = null
+  stopActiveReplayAudio()
+
+  state.replayPreview = {
+    ...state.replayPreview,
+    activeEventId: '',
+    detail: `${session.cues.length} Echo events replayed`,
+    error: '',
+    mode: 'complete',
+    progress: 100,
+    title: 'Echo complete'
+  }
+  render()
 }
 
 function recordingSupported() {
@@ -898,9 +1083,15 @@ function renderRoom() {
       const reactionClass = reaction
         ? `reaction-${safeClass(reaction.type)} tone-${reaction.tone}`
         : ''
+      const replayClass = [
+        state.replayPreview.activeEventId === event.id ? 'replay-active' : '',
+        state.replayPreview.anchorId === event.id ? 'replay-anchor' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
 
       return `
-        <li class="timeline-event ${event.type} ${status} ${reactionClass}">
+        <li class="timeline-event ${event.type} ${status} ${reactionClass} ${replayClass}">
           <div class="event-icon" aria-hidden="true"></div>
           <div>
             <div class="event-meta">
@@ -910,7 +1101,14 @@ function renderRoom() {
             ${renderTimelineEventBody(event, meta)}
             <div class="event-footer">
               <span class="event-sender">${escapeHtml(event.sender)}</span>
-              <span class="event-status ${status}">${escapeHtml(eventStatusLabel(event))}</span>
+              <div class="event-actions">
+                <span class="event-status ${status}">${escapeHtml(eventStatusLabel(event))}</span>
+                ${
+                  event.type !== 'system'
+                    ? `<button class="event-replay-action" type="button" data-replay-anchor="${escapeHtml(event.id)}">Replay</button>`
+                    : ''
+                }
+              </div>
             </div>
           </div>
         </li>
@@ -1114,10 +1312,25 @@ function renderRoom() {
     })
   }
 
+  const replayAgainButton = document.getElementById('replay-again')
+  if (replayAgainButton) {
+    replayAgainButton.addEventListener('click', () => {
+      startReplayEcho(state.replayPreview.anchorId)
+      sendWorkerCommand('echo:replay')
+    })
+  }
+
   for (const button of document.querySelectorAll('[data-chant-load]')) {
     button.addEventListener('click', () => {
       const event = state.events.find((item) => item.id === button.dataset.chantLoad)
       if (event) loadChantAudio(event)
+    })
+  }
+
+  for (const button of document.querySelectorAll('[data-replay-anchor]')) {
+    button.addEventListener('click', () => {
+      startReplayEcho(button.dataset.replayAnchor)
+      sendWorkerCommand('echo:replay')
     })
   }
 
@@ -1134,7 +1347,7 @@ function renderRoom() {
 
   document.getElementById('replay-echo').addEventListener('click', () => {
     if (!hasEvents) return
-    startReplayEchoPreview()
+    startReplayEcho()
     sendWorkerCommand('echo:replay')
   })
 }
@@ -1142,21 +1355,77 @@ function renderRoom() {
 function renderReplayPreview() {
   const replay = state.replayPreview
   if (!replay.active) return ''
+  const complete = replay.mode === 'complete'
 
   return `
-    <section class="replay-preview" aria-live="polite">
-      <div>
-        <span class="status-label">Replay Echo</span>
-        <strong>${escapeHtml(replay.title)}</strong>
-        <p>${escapeHtml(replay.detail)}</p>
-        ${replay.error ? `<small>${escapeHtml(replay.error)}</small>` : ''}
+    <section class="replay-preview ${complete ? 'complete' : 'running'}" aria-live="polite">
+      <div class="replay-main">
+        <div>
+          <span class="status-label">Replay Echo</span>
+          <strong>${escapeHtml(replay.title)}</strong>
+          <p>${escapeHtml(replay.detail)}</p>
+          ${replay.error ? `<small>${escapeHtml(replay.error)}</small>` : ''}
+        </div>
+        <div class="replay-meta">
+          <span>${escapeHtml(replay.anchorLabel)}</span>
+          <span>${escapeHtml(replay.windowLabel)}</span>
+          <span>${replay.cueCount} cues</span>
+        </div>
       </div>
-      <div class="replay-progress" aria-hidden="true">
-        <span style="width: ${replay.progress}%"></span>
+      <div class="replay-progress-block">
+        <div class="replay-progress" aria-hidden="true">
+          <span style="width: ${replay.progress}%"></span>
+        </div>
+        ${renderReplayCueRail(replay)}
       </div>
-      <button class="ghost-action" id="replay-close" type="button">Close</button>
+      <div class="replay-feed">
+        ${renderReplayMessages(replay)}
+      </div>
+      <div class="replay-controls">
+        <button class="ghost-action" id="replay-again" type="button">${complete ? 'Replay again' : 'Restart'}</button>
+        <button class="ghost-action" id="replay-close" type="button">Close</button>
+      </div>
     </section>
   `
+}
+
+function renderReplayCueRail(replay) {
+  if (!replay.cues.length) return ''
+
+  return `
+    <div class="replay-cue-rail" aria-hidden="true">
+      ${replay.cues
+        .map(
+          (cue) => `
+            <span
+              class="tone-${escapeHtml(safeClass(cue.tone))} ${replay.activeEventId === cue.id ? 'active' : ''}"
+              title="${escapeHtml(`${cue.offset} ${cue.label}`)}"
+            ></span>
+          `
+        )
+        .join('')}
+    </div>
+  `
+}
+
+function renderReplayMessages(replay) {
+  if (!replay.messages.length) {
+    return `<div class="replay-empty">Waiting for the first Echo cue.</div>`
+  }
+
+  return replay.messages
+    .map(
+      (message) => `
+        <article class="replay-message tone-${escapeHtml(safeClass(message.tone))}">
+          <span>${escapeHtml(message.offset)}</span>
+          <div>
+            <strong>${escapeHtml(message.label)}</strong>
+            <p>${escapeHtml(message.sender)} · ${escapeHtml(message.text)}</p>
+          </div>
+        </article>
+      `
+    )
+    .join('')
 }
 
 function renderTimelineEventBody(event, meta) {
