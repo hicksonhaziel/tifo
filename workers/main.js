@@ -49,6 +49,7 @@ function send(type, payload = {}) {
 const roomPeers = new Map()
 const roomControlProtocol = 'tifo-room-control-v1'
 let roomTopic = null
+let echoRefreshInterval = null
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 
@@ -105,6 +106,26 @@ function sendAllPeerSnapshots() {
   for (const peer of roomPeers.values()) sendPeerSnapshot(peer)
 }
 
+function nudgePeersToRefresh() {
+  for (const peer of roomPeers.values()) {
+    sendPeer(peer, {
+      type: 'echo:refresh'
+    })
+  }
+}
+
+function broadcastRoomEvent(event, exceptPeerId = null) {
+  if (!roomState.state.room) return
+
+  for (const peer of roomPeers.values()) {
+    if (peer.id === exceptPeerId) continue
+    sendPeer(peer, {
+      type: 'event:announce',
+      event
+    })
+  }
+}
+
 function updateRoomPeerStatus() {
   const count = roomPeers.size
   send('peer:count', { count })
@@ -116,13 +137,39 @@ function updateRoomPeerStatus() {
   })
 }
 
-function persistEvent(event) {
-  echoTimeline.append(event).catch((err) => {
-    send('error', {
-      command: 'echo:persist',
-      message: err.message || 'Could not save event locally'
+function startEchoRefresh() {
+  stopEchoRefresh()
+  echoRefreshInterval = setInterval(() => {
+    if (!roomState.state.room || roomPeers.size === 0) return
+    sendAllPeerSnapshots()
+    echoTimeline.refresh().catch((err) => {
+      send('error', {
+        command: 'echo:refresh',
+        message: err.message || 'Could not refresh Echo timeline'
+      })
     })
-  })
+  }, 1200)
+}
+
+function stopEchoRefresh() {
+  if (!echoRefreshInterval) return
+  clearInterval(echoRefreshInterval)
+  echoRefreshInterval = null
+}
+
+function persistEvent(event) {
+  echoTimeline
+    .append(event)
+    .then(async () => {
+      await echoTimeline.refresh()
+      nudgePeersToRefresh()
+    })
+    .catch((err) => {
+      send('error', {
+        command: 'echo:persist',
+        message: err.message || 'Could not save event locally'
+      })
+    })
 }
 
 async function handleJoinRoom(room) {
@@ -141,6 +188,7 @@ async function handleLeaveRoom() {
 
 function handleLocalEvent(event) {
   persistEvent(event)
+  broadcastRoomEvent(event)
 }
 
 function handleRemoteEvent(event) {
@@ -183,6 +231,18 @@ async function handlePeerMessage(peer, message) {
     }
 
     await handlePeerIdentity(peer, message.echo)
+    return
+  }
+
+  if (message.type === 'echo:refresh') {
+    await echoTimeline.refresh()
+    sendPeerSnapshot(peer)
+    return
+  }
+
+  if (message.type === 'event:announce') {
+    const addedEvent = roomState.addRemoteEvent(message.event)
+    if (addedEvent) broadcastRoomEvent(addedEvent, peer.id)
   }
 }
 
@@ -201,6 +261,7 @@ async function handlePeerIdentity(peer, echo) {
   if (chosenBaseKey !== localBaseKey) {
     await echoTimeline.adoptBase(chosenBaseKey)
     sendAllPeerSnapshots()
+    await echoTimeline.refresh()
     return
   }
 
@@ -210,7 +271,10 @@ async function handlePeerIdentity(peer, echo) {
   }
 
   const addedWriter = await echoTimeline.addWriter(peerWriterKey)
-  if (addedWriter) sendPeerSnapshot(peer)
+  if (addedWriter) {
+    sendPeerSnapshot(peer)
+    await echoTimeline.refresh()
+  }
 }
 
 function closeRoomPeer(peer) {
@@ -279,10 +343,12 @@ function handleRoomConnection(connection, peerInfo) {
   connection.on('close', () => closeRoomPeer(peer))
 
   updateRoomPeerStatus()
+  echoTimeline.refresh().catch(() => {})
 }
 
 function joinRoomNetwork(room) {
   leaveRoomNetwork()
+  startEchoRefresh()
 
   roomTopic = topicForRoom(room.code)
   const roomDiscovery = roomSwarm.join(roomTopic, {
@@ -308,6 +374,8 @@ function joinRoomNetwork(room) {
 }
 
 function leaveRoomNetwork() {
+  stopEchoRefresh()
+
   if (roomTopic) {
     roomSwarm.leave(roomTopic).catch((err) => {
       console.error('Failed to leave room topic:', err)
@@ -323,6 +391,7 @@ roomSwarm.on('connection', handleRoomConnection)
 roomSwarm.on('update', updateRoomPeerStatus)
 
 goodbye(async () => {
+  stopEchoRefresh()
   await echoTimeline.closeRoom()
   await legacyEventLog.closeRoom()
   await roomSwarm.destroy()

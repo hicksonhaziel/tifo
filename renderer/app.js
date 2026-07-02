@@ -14,18 +14,36 @@ const state = {
   syncStatus: 'Waiting for worker',
   peerCount: 0,
   events: [],
+  chatDraft: '',
+  effects: [],
+  seenEffectEventIds: new Set(),
   lastError: ''
 }
 
 const reactionTypes = [
-  { type: 'goal', label: 'Goal', accent: 'red' },
-  { type: 'save', label: 'Save', accent: 'white' },
-  { type: 'var', label: 'VAR', accent: 'red' },
-  { type: 'full-time', label: 'Full-time', accent: 'white' },
-  { type: 'flare', label: 'Flare', accent: 'red' }
+  { type: 'goal', label: 'Goal', tone: 'ignite', cue: 'Terrace eruption' },
+  { type: 'save', label: 'Save', tone: 'clean', cue: 'Safe hands' },
+  { type: 'penalty', label: 'Penalty', tone: 'warning', cue: 'Pressure rising' },
+  { type: 'var', label: 'VAR', tone: 'warning', cue: 'Decision pending' },
+  { type: 'red-card', label: 'Red card', tone: 'danger', cue: 'The room turns' },
+  { type: 'full-time', label: 'Full-time', tone: 'clean', cue: 'Whistle blown' },
+  { type: 'heartbreak', label: 'Heartbreak', tone: 'cold', cue: 'Terrace drop' },
+  { type: 'flare', label: 'Flare', tone: 'ignite', cue: 'Stand lit' }
 ]
 
 const app = document.getElementById('app')
+
+function reactionTheme(type) {
+  return reactionTypes.find((reaction) => reaction.type === type) || reactionTypes[0]
+}
+
+function safeClass(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -62,9 +80,10 @@ function eventMeta(event) {
   }
 
   if (event.type === 'reaction') {
+    const reaction = reactionTheme(event.payload.type)
     return {
-      label: 'Reaction',
-      text: event.payload.label
+      label: reaction.label,
+      text: reaction.cue
     }
   }
 
@@ -106,7 +125,46 @@ function upsertEvent(event) {
   state.events.unshift(event)
 }
 
+function rememberEffectEvents(events) {
+  for (const event of events) {
+    if (event?.type === 'reaction') state.seenEffectEventIds.add(event.id)
+  }
+}
+
+function triggerReactionEffect(event) {
+  if (!event || event.type !== 'reaction' || state.seenEffectEventIds.has(event.id)) return
+
+  state.seenEffectEventIds.add(event.id)
+
+  const reaction = reactionTheme(event.payload.type)
+  const effect = {
+    id: event.id,
+    type: reaction.type,
+    label: reaction.label,
+    tone: reaction.tone,
+    sender: event.sender,
+    createdAt: Date.now()
+  }
+
+  state.effects = [effect, ...state.effects].slice(0, 4)
+
+  setTimeout(() => {
+    state.effects = state.effects.filter((item) => item.id !== effect.id)
+    if (state.view === 'room') render()
+  }, 2200)
+}
+
+function applyLiveEffects(events) {
+  for (const event of events) triggerReactionEffect(event)
+}
+
+function eventListSignature(events) {
+  return events.map((event) => `${event.id}:${event.status}:${event.version}`).join('|')
+}
+
 function applyWorkerMessage(message) {
+  let shouldRender = true
+
   switch (message.type) {
     case 'app:ready':
       state.workerStatus = 'ready'
@@ -121,6 +179,10 @@ function applyWorkerMessage(message) {
       state.peerCount = message.peerCount
       state.syncStatus = message.syncStatus
       state.events = message.events || []
+      state.chatDraft = ''
+      state.effects = []
+      state.seenEffectEventIds.clear()
+      rememberEffectEvents(state.events)
       state.lastError = ''
       break
     case 'room:left':
@@ -129,20 +191,33 @@ function applyWorkerMessage(message) {
       state.peerCount = 0
       state.syncStatus = message.syncStatus || 'Worker ready'
       state.events = message.events || []
+      state.chatDraft = ''
+      state.effects = []
+      state.seenEffectEventIds.clear()
       state.lastError = ''
       break
     case 'peer:count':
+      shouldRender = state.peerCount !== message.count
       state.peerCount = message.count
       break
     case 'sync:status':
+      shouldRender = state.syncStatus !== message.status
       state.syncStatus = message.status
       break
     case 'event:added':
+      triggerReactionEffect(message.event)
       upsertEvent(message.event)
       state.lastError = ''
       break
     case 'event:list':
-      state.events = message.events || []
+      {
+        const events = message.events || []
+        shouldRender = eventListSignature(state.events) !== eventListSignature(events)
+        if (shouldRender) {
+          applyLiveEffects(events)
+          state.events = events
+        }
+      }
       break
     case 'error':
       state.lastError = message.message || 'Worker error'
@@ -153,7 +228,7 @@ function applyWorkerMessage(message) {
       return
   }
 
-  render()
+  if (shouldRender) render()
 }
 
 function renderHome() {
@@ -265,13 +340,18 @@ function renderRoom() {
   const latestEvent = metrics.playableEvents[0]
   const connected = state.peerCount > 0
   const syncTone = state.lastError ? 'error' : connected ? 'connected' : 'searching'
+  const activeEffect = state.effects[0]
   const timeline = state.events
     .map((event) => {
       const meta = eventMeta(event)
       const status = eventStatus(event)
+      const reaction = event.type === 'reaction' ? reactionTheme(event.payload.type) : null
+      const reactionClass = reaction
+        ? `reaction-${safeClass(reaction.type)} tone-${reaction.tone}`
+        : ''
 
       return `
-        <li class="timeline-event ${event.type} ${status}">
+        <li class="timeline-event ${event.type} ${status} ${reactionClass}">
           <div class="event-icon" aria-hidden="true"></div>
           <div>
             <div class="event-meta">
@@ -290,7 +370,8 @@ function renderRoom() {
     .join('')
 
   app.innerHTML = `
-    <main class="room-view">
+    <main class="room-view ${activeEffect ? `effect-${safeClass(activeEffect.tone)}` : ''}">
+      ${renderReactionEffects()}
       <header class="room-header">
         <div class="brand-mini">
           <img
@@ -328,10 +409,10 @@ function renderRoom() {
             <strong>${escapeHtml(match.away)}</strong>
           </div>
         </div>
-        <div class="stage-summary ${syncTone}">
+        <div class="stage-summary ${syncTone} ${activeEffect ? 'active-reaction' : ''}">
           <span>Room sync</span>
-          <strong>${escapeHtml(state.syncStatus)}</strong>
-          <p>${latestEvent ? escapeHtml(eventMeta(latestEvent).text) : 'Waiting for the first chant, flare, or message.'}</p>
+          <strong>${escapeHtml(activeEffect ? activeEffect.label : state.syncStatus)}</strong>
+          <p>${escapeHtml(activeEffect ? `${activeEffect.sender} lifted the terrace` : latestEvent ? eventMeta(latestEvent).text : 'Waiting for the first chant, flare, or message.')}</p>
         </div>
       </section>
 
@@ -377,6 +458,7 @@ function renderRoom() {
               maxlength="180"
               placeholder="Send a terrace message"
               autocomplete="off"
+              value="${escapeHtml(state.chatDraft)}"
             />
             <button type="submit">Send</button>
           </form>
@@ -394,12 +476,15 @@ function renderRoom() {
               .map(
                 (reaction) => `
                   <button
-                    class="reaction-button ${reaction.accent}"
+                    class="reaction-button tone-${reaction.tone}"
                     type="button"
                     data-reaction="${escapeHtml(reaction.type)}"
                   >
                     <span class="reaction-dot" aria-hidden="true"></span>
-                    ${escapeHtml(reaction.label)}
+                    <span>
+                      <strong>${escapeHtml(reaction.label)}</strong>
+                      <small>${escapeHtml(reaction.cue)}</small>
+                    </span>
                   </button>
                 `
               )
@@ -447,7 +532,12 @@ function renderRoom() {
     const text = input.value.trim()
     if (!text) return
     input.value = ''
+    state.chatDraft = ''
     sendWorkerCommand('chat:send', { text })
+  })
+
+  document.getElementById('chat-input').addEventListener('input', (event) => {
+    state.chatDraft = event.currentTarget.value
   })
 
   for (const button of document.querySelectorAll('[data-reaction]')) {
@@ -465,6 +555,26 @@ function renderRoom() {
     if (!hasEvents) return
     sendWorkerCommand('echo:replay')
   })
+}
+
+function renderReactionEffects() {
+  if (state.effects.length === 0) return ''
+
+  return `
+    <div class="reaction-fx-layer" aria-hidden="true">
+      ${state.effects
+        .map(
+          (effect, index) => `
+            <div class="reaction-burst tone-${safeClass(effect.tone)} burst-${index}">
+              <span>${escapeHtml(effect.label)}</span>
+              <small>${escapeHtml(effect.sender)}</small>
+            </div>
+          `
+        )
+        .join('')}
+      <div class="terrace-flash tone-${safeClass(state.effects[0].tone)}"></div>
+    </div>
+  `
 }
 
 function renderChatItems() {

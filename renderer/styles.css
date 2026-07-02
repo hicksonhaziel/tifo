@@ -11,6 +11,7 @@
   --red-dark: #8f1f1c;
   --green: #2fc57d;
   --amber: #f0b44c;
+  --cold: #75bfff;
   --white-soft: #e1e1e1;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
   --radius: 8px;
@@ -399,6 +400,7 @@ input:focus {
 }
 
 .room-view {
+  position: relative;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 14px;
@@ -406,6 +408,138 @@ input:focus {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 26%),
     linear-gradient(135deg, rgba(229, 57, 53, 0.08), transparent 38%);
+}
+
+.room-view.effect-ignite {
+  animation: room-ignite-pulse 900ms ease-out;
+}
+
+.room-view.effect-warning {
+  animation: room-warning-pulse 900ms ease-out;
+}
+
+.room-view.effect-clean {
+  animation: room-clean-pulse 900ms ease-out;
+}
+
+.room-view.effect-danger {
+  animation: room-danger-pulse 900ms ease-out;
+}
+
+.room-view.effect-cold {
+  animation: room-cold-pulse 900ms ease-out;
+}
+
+.reaction-fx-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.terrace-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: terrace-flash 760ms ease-out;
+}
+
+.terrace-flash.tone-ignite {
+  background: radial-gradient(circle at 50% 34%, rgba(229, 57, 53, 0.34), transparent 34%);
+}
+
+.terrace-flash.tone-warning {
+  background: radial-gradient(circle at 50% 34%, rgba(240, 180, 76, 0.3), transparent 34%);
+}
+
+.terrace-flash.tone-clean {
+  background: radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.2), transparent 34%);
+}
+
+.terrace-flash.tone-danger {
+  background: radial-gradient(circle at 50% 34%, rgba(255, 53, 63, 0.36), transparent 34%);
+}
+
+.terrace-flash.tone-cold {
+  background: radial-gradient(circle at 50% 34%, rgba(117, 191, 255, 0.3), transparent 34%);
+}
+
+.reaction-burst {
+  position: absolute;
+  top: 106px;
+  left: 50%;
+  display: grid;
+  min-width: 180px;
+  justify-items: center;
+  gap: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 8, 8, 0.82);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.42);
+  padding: 12px 16px;
+  transform: translateX(-50%);
+  animation: reaction-burst 1800ms ease-out forwards;
+}
+
+.reaction-burst span {
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.reaction-burst small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reaction-burst.tone-ignite {
+  border-color: rgba(229, 57, 53, 0.54);
+  color: #ffd4d3;
+}
+
+.reaction-burst.tone-warning {
+  border-color: rgba(240, 180, 76, 0.56);
+  color: #ffe1aa;
+}
+
+.reaction-burst.tone-clean {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: var(--white-soft);
+}
+
+.reaction-burst.tone-danger {
+  border-color: rgba(255, 53, 63, 0.62);
+  color: #ffc2c7;
+}
+
+.reaction-burst.tone-cold {
+  border-color: rgba(117, 191, 255, 0.58);
+  color: #cde9ff;
+}
+
+.reaction-burst.burst-1 {
+  top: 156px;
+  left: 33%;
+  animation-delay: 80ms;
+  transform: translateX(-50%) scale(0.88);
+}
+
+.reaction-burst.burst-2 {
+  top: 156px;
+  left: 67%;
+  animation-delay: 120ms;
+  transform: translateX(-50%) scale(0.82);
+}
+
+.reaction-burst.burst-3 {
+  top: 202px;
+  left: 50%;
+  animation-delay: 160ms;
+  transform: translateX(-50%) scale(0.76);
 }
 
 .room-header {
@@ -588,6 +722,13 @@ input:focus {
   color: #ff8f8b;
 }
 
+.stage-summary.active-reaction {
+  border-color: rgba(240, 180, 76, 0.42);
+  box-shadow:
+    0 18px 55px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(240, 180, 76, 0.12) inset;
+}
+
 .stage-summary strong {
   overflow: hidden;
   font-size: 18px;
@@ -765,28 +906,86 @@ input:focus {
 }
 
 .reaction-button {
-  display: flex;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 9px;
+  gap: 10px;
+  min-height: 58px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   background: rgba(255, 255, 255, 0.04);
-  padding: 0 10px;
+  padding: 10px;
+  text-align: left;
 }
 
-.reaction-button.red {
+.reaction-button.tone-ignite,
+.reaction-button.tone-danger {
   border-color: rgba(229, 57, 53, 0.35);
 }
 
+.reaction-button.tone-warning {
+  border-color: rgba(240, 180, 76, 0.35);
+}
+
+.reaction-button.tone-clean {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.reaction-button.tone-cold {
+  border-color: rgba(117, 191, 255, 0.35);
+}
+
+.reaction-button:hover {
+  transform: translateY(-1px);
+}
+
+.reaction-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
 .reaction-dot {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
   background: currentColor;
 }
 
-.reaction-button.red .reaction-dot {
+.reaction-button.tone-ignite .reaction-dot {
   color: var(--red);
+}
+
+.reaction-button.tone-warning .reaction-dot {
+  color: var(--amber);
+}
+
+.reaction-button.tone-clean .reaction-dot {
+  color: var(--white-soft);
+}
+
+.reaction-button.tone-danger .reaction-dot {
+  color: #ff3540;
+}
+
+.reaction-button.tone-cold .reaction-dot {
+  color: var(--cold);
+}
+
+.reaction-button strong,
+.reaction-button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reaction-button strong {
+  font-size: 13px;
+}
+
+.reaction-button small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .replay-action {
@@ -838,10 +1037,31 @@ input:focus {
 
 .timeline-event.reaction .event-icon {
   background: var(--red);
+  animation: event-dot-pop 900ms ease-out;
 }
 
 .timeline-event.system .event-icon {
   background: var(--amber);
+}
+
+.timeline-event.reaction {
+  animation: timeline-highlight 900ms ease-out;
+}
+
+.timeline-event.tone-warning .event-icon {
+  background: var(--amber);
+}
+
+.timeline-event.tone-clean .event-icon {
+  background: var(--white-soft);
+}
+
+.timeline-event.tone-danger .event-icon {
+  background: #ff3540;
+}
+
+.timeline-event.tone-cold .event-icon {
+  background: var(--cold);
 }
 
 .event-meta {
@@ -955,5 +1175,129 @@ input:focus {
 
   .score-core {
     min-height: 68px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@keyframes reaction-burst {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(18px) scale(0.72);
+  }
+
+  14% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+
+  62% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-40px) scale(0.94);
+  }
+}
+
+@keyframes terrace-flash {
+  0% {
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes timeline-highlight {
+  0% {
+    border-color: rgba(240, 180, 76, 0.8);
+    box-shadow: 0 0 0 1px rgba(240, 180, 76, 0.26) inset;
+  }
+
+  100% {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+}
+
+@keyframes event-dot-pop {
+  0% {
+    transform: scale(0.6);
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.36);
+  }
+
+  60% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 9px rgba(229, 57, 53, 0);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes room-ignite-pulse {
+  0% {
+    background-color: rgba(229, 57, 53, 0.16);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes room-warning-pulse {
+  0% {
+    background-color: rgba(240, 180, 76, 0.14);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes room-clean-pulse {
+  0% {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes room-danger-pulse {
+  0% {
+    background-color: rgba(255, 53, 63, 0.18);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes room-cold-pulse {
+  0% {
+    background-color: rgba(117, 191, 255, 0.14);
+  }
+
+  100% {
+    background-color: transparent;
   }
 }

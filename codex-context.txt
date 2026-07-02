@@ -14,7 +14,7 @@ Phase 2 is complete.
 Phase 3 is complete and pushed.
 Phase 4 is complete and pushed.
 Phase 5 is complete and pushed.
-Next phase is Phase 6: Live Reactions and Visual Flares.
+Phase 6 is in progress locally: Live Reactions and Visual Flares.
 
 What Is Implemented Now
 - Repo is based on Holepunch's hello-pear-electron starter.
@@ -57,6 +57,25 @@ What Is Implemented Now
 - Phase 5 close/reopen null-key guard is implemented in TifoEchoTimeline.
 - Room UI has been cleaned up into a clearer match dashboard with stronger sync
   state, match summary, chat, action, and Echo timeline sections.
+- Phase 6 local work adds richer reaction controls and live reaction effects in
+  the renderer.
+- New reaction choices include Goal, Save, Penalty, VAR, Red card, Full-time,
+  Heartbreak, and Flare.
+- Synced reaction events trigger short terrace flashes, burst labels, stage
+  status changes, and timeline highlights.
+- Loaded saved room history is marked as already seen so old reactions do not all
+  replay effects on room join.
+- Local Phase 6 debugging added an Echo refresh loop while a room has peers so
+  replicated Autobase events are pulled into the renderer even if a wake/update
+  signal is missed.
+- Chat draft input is preserved across renderer refreshes, and identical
+  event:list refreshes no longer trigger full room re-renders.
+- Local appends now send an echo:refresh control nudge to connected peers. The
+  nudge does not carry chat/reaction payloads; it asks peers to refresh their
+  replicated Autobase view.
+- Live chat/reaction reliability now also uses a deduped event:announce message
+  on the Protomux control channel. Received announcements are validated by
+  workers/tifo-room-state.js and persisted into the local Autobase Echo timeline.
 - The room UI shows live P2P state, saved event count, peer-event count, and
   local/peer/saved event badges.
 - BUILD.md and PLAN.md are private local planning files and ignored by git.
@@ -290,6 +309,46 @@ Phase 5 manual test:
 - Send a chat/reaction from Yassine and confirm it appears in Amina.
 - Watch for peer count drops when either side leaves.
 
+Phase 6 Status
+Goal in progress locally: make reaction events feel alive without changing the
+Autobase room model.
+
+Phase 6 implementation status:
+- Expanded reaction buttons to Goal, Save, Penalty, VAR, Red card, Full-time,
+  Heartbreak, and Flare. Implemented locally.
+- Added renderer-side reaction theme metadata for tone and cue text. Implemented
+  locally.
+- Added live reaction effect state in renderer/app.js. Implemented locally.
+- Trigger reaction effects from event:added and event:list worker messages.
+  Implemented locally.
+- Prevent old stored reactions from replaying animations on room join.
+  Implemented locally.
+- Added terrace flash overlays, reaction burst labels, room pulse classes,
+  button feedback, and timeline highlights in renderer/styles.css. Implemented
+  locally.
+- Added reduced-motion CSS safeguards. Implemented locally.
+- Added TifoEchoTimeline.refresh() and a scoped worker refresh interval while a
+  room has connected peers. Implemented locally.
+- Added renderer chatDraft state and event-list signature checks so refreshes do
+  not erase typed chat input. Implemented locally.
+- Added echo:refresh peer control nudges after local appends. Implemented
+  locally.
+- Added event:announce peer control messages as a reliable live-sync layer while
+  keeping Autobase as the persisted Echo timeline. Implemented locally.
+- No test scripts or new test files were added.
+
+Phase 6 manual test before commit/push:
+- Run npm run lint.
+- Run node --check renderer/app.js workers/main.js workers/tifo-room-state.js.
+- Start two app instances with separate storage.
+- Join the same room in both windows.
+- Press each reaction button in one window and confirm the other window receives
+  the timeline event.
+- Confirm Goal/Flare visibly trigger a burst and flash.
+- Confirm rapid reactions do not freeze or resize the layout.
+- Quit and rejoin with same storage; saved reactions should appear without
+  replaying every old animation.
+
 Important Product Rules
 - No backend server.
 - No accounts.
@@ -307,6 +366,7 @@ Git State At Last Update
 - Phase 3 was pushed as ba4ac7f Add first P2P room sync.
 - Phase 4 was pushed as 74cbd3a Persist room events locally.
 - Phase 5 was pushed as a1f7ff8 Add distributed Autobase room sync.
+- Phase 6 is local and not pushed until manual visual testing passes.
 
 If Something Is Unclear
 - Check official Pear docs first: https://docs.pears.com/

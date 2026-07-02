@@ -139,6 +139,10 @@ class TifoEchoTimeline {
     return this.flushPendingRecords()
   }
 
+  refresh() {
+    return this.notifyUpdate()
+  }
+
   queueRecord(record) {
     this.pendingRecords.push(record)
   }
