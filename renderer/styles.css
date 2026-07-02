@@ -1115,7 +1115,8 @@ input:focus {
 }
 
 .chant-action:disabled,
-.chant-fallback-action:disabled {
+.chant-fallback-action:disabled,
+.chant-load-action:disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }

@@ -49,9 +49,11 @@ function send(type, payload = {}) {
 
 const roomPeers = new Map()
 const roomControlProtocol = 'tifo-room-control-v1'
+const chantMaxBytes = 2 * 1024 * 1024
 let roomTopic = null
 let echoRefreshInterval = null
 const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
+const pendingChantRequests = new Map()
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 
@@ -109,6 +111,10 @@ function chantFilePath(roomCode, fileId) {
   return path.join(chantRoomDir(roomCode), safeFilePart(fileId))
 }
 
+function chantRequestId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
 function sendPeer(peer, message) {
   if (peer.closed || !peer.controlMessage) return
   peer.controlMessage.send({
@@ -149,6 +155,28 @@ function broadcastRoomEvent(event, exceptPeerId = null) {
       type: 'event:announce',
       event
     })
+  }
+}
+
+function broadcastChantRequest(request) {
+  for (const peer of roomPeers.values()) {
+    sendPeer(peer, {
+      type: 'chant:request',
+      ...request
+    })
+  }
+}
+
+function clearPendingChantRequests(message = 'Chant transfer was cancelled') {
+  for (const [requestId, pending] of pendingChantRequests) {
+    clearTimeout(pending.timeout)
+    if (!pending.silent) {
+      send('error', {
+        command: 'chant:load',
+        message
+      })
+    }
+    pendingChantRequests.delete(requestId)
   }
 }
 
@@ -257,7 +285,7 @@ async function handleChantSave(command) {
     return null
   }
 
-  if (data.byteLength > 2 * 1024 * 1024) {
+  if (data.byteLength > chantMaxBytes) {
     send('error', {
       command: 'chant:save',
       message: 'Recorded chant is too large'
@@ -277,6 +305,65 @@ async function handleChantSave(command) {
     fileId,
     mimeType: command.mimeType,
     size: data.byteLength
+  }
+}
+
+async function loadLocalChant(roomCode, fileId) {
+  const safeFileId = safeFilePart(fileId)
+  const data = await fs.readFile(chantFilePath(roomCode, safeFileId))
+  if (data.byteLength > chantMaxBytes) throw new Error('Chant audio is too large')
+  return { data, fileId: safeFileId }
+}
+
+function sendLoadedChant({ data, eventId, fileId, mimeType }) {
+  send('chant:loaded', {
+    eventId: eventId.slice(0, 96),
+    dataUrl: `data:${mimeType};base64,${b4a.toString(data, 'base64')}`,
+    fileId
+  })
+}
+
+function requestRemoteChant({ eventId, fileId, mimeType, silent = false }) {
+  if (roomPeers.size === 0) {
+    if (!silent) {
+      send('error', {
+        command: 'chant:load',
+        message: 'This chant audio is not available on this device and no peers are connected'
+      })
+    }
+    return
+  }
+
+  const requestId = chantRequestId()
+  const timeout = setTimeout(() => {
+    pendingChantRequests.delete(requestId)
+    if (!silent) {
+      send('error', {
+        command: 'chant:load',
+        message: 'Connected peers do not have this chant audio yet'
+      })
+    }
+  }, 5000)
+
+  pendingChantRequests.set(requestId, {
+    eventId,
+    fileId,
+    mimeType,
+    silent,
+    timeout
+  })
+
+  broadcastChantRequest({
+    eventId,
+    fileId,
+    mimeType,
+    requestId
+  })
+
+  if (!silent) {
+    send('sync:status', {
+      status: 'Requesting chant audio from peers'
+    })
   }
 }
 
@@ -300,23 +387,103 @@ async function handleChantLoad(command) {
 
   try {
     const fileId = safeFilePart(command.fileId)
-    const data = await fs.readFile(chantFilePath(room.code, fileId))
     const mimeType =
       typeof command.mimeType === 'string' && command.mimeType.trim()
         ? command.mimeType.trim().slice(0, 80)
         : 'audio/webm'
+    const { data } = await loadLocalChant(room.code, fileId)
 
-    send('chant:loaded', {
-      eventId: command.eventId.slice(0, 96),
-      dataUrl: `data:${mimeType};base64,${b4a.toString(data, 'base64')}`,
-      fileId
+    sendLoadedChant({
+      data,
+      eventId: command.eventId,
+      fileId,
+      mimeType
     })
   } catch {
-    send('error', {
-      command: 'chant:load',
-      message: 'This chant audio is not available on this device'
+    requestRemoteChant({
+      eventId: command.eventId.slice(0, 96),
+      fileId: safeFilePart(command.fileId),
+      mimeType:
+        typeof command.mimeType === 'string' && command.mimeType.trim()
+          ? command.mimeType.trim().slice(0, 80)
+          : 'audio/webm',
+      silent: command.silent === true
     })
   }
+}
+
+async function handlePeerChantRequest(peer, message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string' || message.requestId.trim() === '') return
+  if (typeof message.eventId !== 'string' || message.eventId.trim() === '') return
+  if (typeof message.fileId !== 'string' || message.fileId.trim() === '') return
+
+  try {
+    const fileId = safeFilePart(message.fileId)
+    const mimeType =
+      typeof message.mimeType === 'string' && message.mimeType.trim()
+        ? message.mimeType.trim().slice(0, 80)
+        : 'audio/webm'
+    const { data } = await loadLocalChant(room.code, fileId)
+
+    sendPeer(peer, {
+      type: 'chant:data',
+      bytesBase64: b4a.toString(data, 'base64'),
+      eventId: message.eventId.slice(0, 96),
+      fileId,
+      mimeType,
+      requestId: message.requestId.slice(0, 96),
+      size: data.byteLength
+    })
+  } catch {
+    // This peer may only have the metadata. Another peer can still answer.
+  }
+}
+
+async function handlePeerChantData(message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string') return
+
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingChantRequests.get(requestId)
+  if (!pending) return
+
+  if (typeof message.bytesBase64 !== 'string') return
+  if (typeof message.fileId !== 'string' || safeFilePart(message.fileId) !== pending.fileId) return
+
+  const maxBase64Chars = Math.ceil(chantMaxBytes * 1.4)
+  if (message.bytesBase64.length > maxBase64Chars) return
+
+  const data = b4a.from(message.bytesBase64, 'base64')
+  const announcedSize = Number(message.size)
+  if (data.byteLength < 256 || data.byteLength > chantMaxBytes) return
+  if (Number.isFinite(announcedSize) && announcedSize !== data.byteLength) return
+
+  clearTimeout(pending.timeout)
+  pendingChantRequests.delete(requestId)
+
+  try {
+    await fs.mkdir(chantRoomDir(room.code), { recursive: true })
+    await fs.writeFile(chantFilePath(room.code, pending.fileId), data)
+  } catch (err) {
+    send('error', {
+      command: 'chant:cache',
+      message: err.message || 'Could not cache chant audio locally'
+    })
+  }
+
+  sendLoadedChant({
+    data,
+    eventId: pending.eventId,
+    fileId: pending.fileId,
+    mimeType: pending.mimeType
+  })
+
+  send('sync:status', {
+    status: `P2P connected: ${roomPeers.size} peer${roomPeers.size === 1 ? '' : 's'}`
+  })
 }
 
 async function handlePeerMessage(peer, message) {
@@ -341,6 +508,15 @@ async function handlePeerMessage(peer, message) {
   if (message.type === 'event:announce') {
     const addedEvent = roomState.addRemoteEvent(message.event)
     if (addedEvent) broadcastRoomEvent(addedEvent, peer.id)
+  }
+
+  if (message.type === 'chant:request') {
+    await handlePeerChantRequest(peer, message)
+    return
+  }
+
+  if (message.type === 'chant:data') {
+    await handlePeerChantData(message)
   }
 }
 
@@ -473,6 +649,7 @@ function joinRoomNetwork(room) {
 
 function leaveRoomNetwork() {
   stopEchoRefresh()
+  clearPendingChantRequests()
 
   if (roomTopic) {
     roomSwarm.leave(roomTopic).catch((err) => {

@@ -45,6 +45,7 @@ const reactionTypes = [
 
 const app = document.getElementById('app')
 const chantAudioUrls = new Map()
+const chantPrefetchIds = new Set()
 const pendingChantLoads = new Map()
 const pendingChantUrls = new Map()
 const CHANT_MIN_MS = 3000
@@ -159,6 +160,7 @@ function sendWorkerCommand(type, payload = {}) {
 
 function upsertEvent(event) {
   attachPendingChantUrl(event)
+  prefetchChantAudio(event)
   const existingIndex = state.events.findIndex((item) => item.id === event.id)
   if (existingIndex >= 0) state.events.splice(existingIndex, 1)
   state.events.unshift(event)
@@ -170,6 +172,19 @@ function attachPendingChantUrl(event) {
 
   chantAudioUrls.set(event.id, pendingChantUrls.get(clientId))
   pendingChantUrls.delete(clientId)
+}
+
+function prefetchChantAudio(event) {
+  if (event?.type !== 'chant' || !event.payload?.fileId) return
+  if (chantAudioUrls.has(event.id) || pendingChantLoads.has(event.id)) return
+  if (chantPrefetchIds.has(event.id)) return
+
+  chantPrefetchIds.add(event.id)
+  loadChantAudio(event, { silent: true })
+}
+
+function prefetchChantAudios(events) {
+  for (const event of events) prefetchChantAudio(event)
 }
 
 function rememberEffectEvents(events) {
@@ -281,7 +296,9 @@ function applyWorkerMessage(message) {
       state.replayPreview = replayIdleState()
       state.effects = []
       state.seenEffectEventIds.clear()
+      chantPrefetchIds.clear()
       rememberEffectEvents(state.events)
+      prefetchChantAudios(state.events)
       state.lastError = ''
       break
     case 'room:left':
@@ -298,6 +315,7 @@ function applyWorkerMessage(message) {
         error: '',
         status: 'idle'
       }
+      chantPrefetchIds.clear()
       state.effects = []
       state.seenEffectEventIds.clear()
       state.lastError = ''
@@ -305,6 +323,7 @@ function applyWorkerMessage(message) {
     case 'peer:count':
       shouldRender = state.peerCount !== message.count
       state.peerCount = message.count
+      if (message.count > 0) prefetchChantAudios(state.events)
       break
     case 'sync:status':
       shouldRender = state.syncStatus !== message.status
@@ -323,6 +342,7 @@ function applyWorkerMessage(message) {
           for (const event of events) attachPendingChantUrl(event)
           applyLiveEffects(events)
           state.events = events
+          prefetchChantAudios(state.events)
         }
       }
       break
@@ -441,7 +461,7 @@ async function saveFallbackChant() {
   }
 }
 
-function loadChantAudio(event) {
+function loadChantAudio(event, options = {}) {
   if (chantAudioUrls.has(event.id)) return Promise.resolve(chantAudioUrls.get(event.id))
   if (!event.payload?.fileId) return Promise.resolve('')
   if (pendingChantLoads.has(event.id)) return pendingChantLoads.get(event.id).promise
@@ -450,17 +470,21 @@ function loadChantAudio(event) {
   const promise = new Promise((resolve) => {
     resolveLoad = resolve
   })
+  const timeoutMs = options.silent === true ? 5000 : 1200
   const timeout = setTimeout(() => {
     pendingChantLoads.delete(event.id)
+    if (options.silent === true && !chantAudioUrls.has(event.id)) chantPrefetchIds.delete(event.id)
     resolveLoad('')
-  }, 1200)
+    if (state.view === 'room') render()
+  }, timeoutMs)
 
   pendingChantLoads.set(event.id, {
     promise,
     resolve: resolveLoad,
     timeout
   })
-  requestChantLoad(event)
+  requestChantLoad(event, options)
+  if (options.silent !== true && state.view === 'room') render()
   return promise
 }
 
@@ -746,12 +770,13 @@ async function finalizeChantRecording({ chunks, durationMs, mimeType }) {
   await saveChantBlob({ blob, durationMs, mimeType })
 }
 
-function requestChantLoad(event) {
+function requestChantLoad(event, options = {}) {
   if (chantAudioUrls.has(event.id)) return
   sendWorkerCommand('chant:load', {
     eventId: event.id,
     fileId: event.payload.fileId,
-    mimeType: event.payload.mimeType
+    mimeType: event.payload.mimeType,
+    silent: options.silent === true
   })
 }
 
@@ -1092,7 +1117,7 @@ function renderRoom() {
   for (const button of document.querySelectorAll('[data-chant-load]')) {
     button.addEventListener('click', () => {
       const event = state.events.find((item) => item.id === button.dataset.chantLoad)
-      if (event) requestChantLoad(event)
+      if (event) loadChantAudio(event)
     })
   }
 
@@ -1138,6 +1163,7 @@ function renderTimelineEventBody(event, meta) {
   if (event.type !== 'chant') return `<p>${escapeHtml(meta.text)}</p>`
 
   const audioUrl = chantAudioUrls.get(event.id)
+  const isLoading = pendingChantLoads.has(event.id)
   const duration = formatDuration(event.payload.durationMs)
 
   return `
@@ -1146,7 +1172,7 @@ function renderTimelineEventBody(event, meta) {
       ${
         audioUrl
           ? `<audio controls preload="metadata" src="${escapeHtml(audioUrl)}"></audio>`
-          : `<button class="chant-load-action" type="button" data-chant-load="${escapeHtml(event.id)}">Load local audio</button>`
+          : `<button class="chant-load-action" type="button" data-chant-load="${escapeHtml(event.id)}" ${isLoading ? 'disabled' : ''}>${escapeHtml(isLoading ? 'Preparing audio' : 'Load audio')}</button>`
       }
     </div>
   `
