@@ -13,8 +13,8 @@ Phase 1 is complete.
 Phase 2 is complete.
 Phase 3 is complete and pushed.
 Phase 4 is complete and pushed.
-Phase 5 is implemented locally and needs two-window manual testing before
-commit/push.
+Phase 5 is complete and pushed.
+Next phase is Phase 6: Live Reactions and Visual Flares.
 
 What Is Implemented Now
 - Repo is based on Holepunch's hello-pear-electron starter.
@@ -63,7 +63,6 @@ What Is Implemented Now
 - package.json uses CommonJS and vanilla JS/CSS. No Tailwind and no TypeScript yet.
 
 What Is Not Implemented Yet
-- Phase 5 has not been manually verified in two real app windows yet.
 - Persisting the adopted shared Autobase base key for future restarts is not
   implemented yet; a peer can adopt again when it reconnects to another peer.
 - No audio chant recording yet.
@@ -245,38 +244,36 @@ Phase 4 manual test:
   and confirm current P2P event exchange still works.
 
 Phase 5 Status
-Goal implemented locally and awaiting manual app verification: move the Echo
-timeline onto Autobase and use replicated writer feeds as the room sync path.
+Goal complete and pushed: move the Echo timeline onto Autobase and use replicated
+writer feeds as the room sync path.
 
 Phase 5 implementation status:
-- Added autobase dependency. Implemented locally.
-- Added workers/tifo-echo-timeline.js. Implemented locally.
-- Open a deterministic Autobase namespace per room code. Implemented locally.
-- Apply Autobase nodes into an echo-timeline materialized view. Implemented
-  locally.
+- Added autobase dependency. Implemented.
+- Added workers/tifo-echo-timeline.js. Implemented.
+- Open a deterministic Autobase namespace per room code. Implemented.
+- Apply Autobase nodes into an echo-timeline materialized view. Implemented.
 - Append local and accepted remote room events to Autobase instead of the old
-  Phase 4 Hypercore log. Implemented locally.
-- Load stored events from the Autobase view on room join. Implemented locally.
+  Phase 4 Hypercore log. Implemented.
+- Load stored events from the Autobase view on room join. Implemented.
 - Local reopen smoke test passed.
-- Add Protomux room control channel over Hyperswarm sockets. Implemented locally.
-- Attach Autobase/Corestore replication to the same Protomux socket. Implemented
-  locally.
-- Exchange base/writer keys in peer identity messages. Implemented locally.
-- Choose a shared base when peers created different local bases. Implemented
-  locally.
+- Add Protomux room control channel over Hyperswarm sockets. Implemented.
+- Attach Autobase/Corestore replication to the same Protomux socket. Implemented.
+- Exchange base/writer keys in peer identity messages. Implemented.
+- Choose a shared base when peers created different local bases. Implemented.
 - Reopen onto the chosen shared base and re-append pending local events.
-  Implemented locally.
+  Implemented.
 - Append writer:add records and call host.addWriter() from the Autobase apply
-  handler. Implemented locally.
+  handler. Implemented.
 - Replace the Phase 3 JSON event-list catch-up with Autobase feed replication.
-  Implemented locally.
+  Implemented.
 - Local two-peer adoption smoke test passed.
-- Manual two-window app test still needed before commit/push.
+- Manual two-window app test passed.
 - Close/reopen null-key crash guard added after manual testing surfaced
   "Cannot read properties of null (reading 'key')".
 - Room UI pass added after manual testing feedback.
+- Pushed as a1f7ff8 Add distributed Autobase room sync.
 
-Phase 5 manual test before commit/push:
+Phase 5 manual test:
 - Run npm run lint.
 - Run node --check for electron/main.js, renderer/app.js, workers/main.js,
   workers/tifo-room-state.js, and workers/tifo-echo-timeline.js.
@@ -309,7 +306,7 @@ Git State At Last Update
 - Remote: github.com:hicksonhaziel/tifo.git.
 - Phase 3 was pushed as ba4ac7f Add first P2P room sync.
 - Phase 4 was pushed as 74cbd3a Persist room events locally.
-- Phase 5 Autobase work is local and not pushed until two-window testing passes.
+- Phase 5 was pushed as a1f7ff8 Add distributed Autobase room sync.
 
 If Something Is Unclear
 - Check official Pear docs first: https://docs.pears.com/
