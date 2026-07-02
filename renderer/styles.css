@@ -1295,14 +1295,134 @@ input:focus {
 
 .chat-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 42px 42px 42px auto;
   gap: 10px;
   margin-top: 14px;
 }
 
-.chat-form button {
+.chat-submit-button {
   background: linear-gradient(135deg, var(--red), #b72b28);
   padding: 0 18px;
+}
+
+.chat-media-action {
+  display: inline-grid;
+  min-height: 42px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chat-media-action:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.085);
+}
+
+.chat-media-action.recording {
+  border-color: rgba(229, 57, 53, 0.55);
+  background: rgba(229, 57, 53, 0.14);
+  color: #ffd5d4;
+}
+
+.chat-media-action.active {
+  border-color: rgba(240, 180, 76, 0.45);
+  background: rgba(240, 180, 76, 0.12);
+  color: #ffe0a8;
+}
+
+.chat-media-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.emoji-picker-popover {
+  width: min(100%, 360px);
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 8, 8, 0.92);
+  padding: 8px;
+}
+
+.tifo-emoji-picker {
+  width: 100%;
+  height: 320px;
+  --background: #111;
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border-radius: 8px;
+  --button-active-background: rgba(229, 57, 53, 0.18);
+  --button-hover-background: rgba(255, 255, 255, 0.08);
+  --category-emoji-padding: 8px;
+  --emoji-font-family:
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif;
+  --indicator-color: var(--red);
+  --input-border-color: rgba(255, 255, 255, 0.18);
+  --input-font-color: var(--text);
+  --input-placeholder-color: var(--muted);
+  --outline-color: rgba(229, 57, 53, 0.42);
+  --text-color: var(--text);
+}
+
+.chat-media-status {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chat-media-status.recording {
+  color: #ffd5d4;
+}
+
+.chat-media-status.error {
+  color: #ffb4b1;
+}
+
+.chat-media-message {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chat-media-message.image img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #050505;
+}
+
+.chat-media-message.voice audio {
+  width: 100%;
+  max-width: 100%;
+  height: 34px;
+}
+
+.chat-media-message small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.chat-media-load {
+  min-height: 38px;
+  border: 1px dashed rgba(117, 191, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(117, 191, 255, 0.08);
+  color: #d8efff;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.chat-media-load:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .reaction-grid {
@@ -1561,6 +1681,10 @@ input:focus {
 
 .timeline-event.chat .event-icon {
   background: var(--white-soft);
+}
+
+.timeline-event.chat-media .event-icon {
+  background: var(--cold);
 }
 
 .timeline-event.reaction .event-icon {

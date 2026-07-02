@@ -128,6 +128,7 @@ export function RoomView({ controller }) {
         <ChatPanel
           actions={actions}
           connected={connected}
+          derived={derived}
           metrics={metrics}
           offlineActive={offlineActive}
           state={state}

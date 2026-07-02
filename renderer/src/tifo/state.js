@@ -36,6 +36,13 @@ export function createInitialState() {
     peerCount: 0,
     events: [],
     chatDraft: '',
+    chatMedia: {
+      imageError: '',
+      imageStatus: 'idle',
+      voiceElapsedMs: 0,
+      voiceError: '',
+      voiceStatus: 'idle'
+    },
     clipDraft: clipDraftIdle(),
     offline: {
       detail: 'Network searching',

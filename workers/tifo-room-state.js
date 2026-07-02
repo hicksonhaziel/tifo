@@ -7,6 +7,7 @@ function createTifoRoomState(options = {}) {
   const onLocalEvent = options.onLocalEvent || noop
   const onRemoteEvent = options.onRemoteEvent || noop
   const onChantSave = options.onChantSave || noop
+  const onChatMediaSave = options.onChatMediaSave || noop
   const onClipSave = options.onClipSave || noop
 
   if (typeof send !== 'function') {
@@ -177,6 +178,29 @@ function createTifoRoomState(options = {}) {
     addEvent('chant', payload)
   }
 
+  async function handleChatMediaSave(command) {
+    if (!requireRoom(command.type)) return
+
+    const payload = sanitizeChatMediaPayload(command)
+    if (!payload) {
+      sendError(command.type, 'Chat media is not valid')
+      return
+    }
+
+    const savedPayload = await onChatMediaSave({
+      ...payload,
+      bytesBase64:
+        typeof command.bytesBase64 === 'string' && command.bytesBase64.trim()
+          ? command.bytesBase64.trim()
+          : '',
+      localPath: typeof command.localPath === 'string' ? command.localPath.trim() : '',
+      roomCode: state.room.code
+    })
+
+    if (!savedPayload) return
+    addEvent('chat-media', savedPayload)
+  }
+
   async function handleClipSave(command) {
     if (!requireRoom(command.type)) return
 
@@ -229,6 +253,9 @@ function createTifoRoomState(options = {}) {
         break
       case 'chant:save':
         await handleChantSave(command)
+        break
+      case 'chat-media:save':
+        await handleChatMediaSave(command)
         break
       case 'clip:save':
         await handleClipSave(command)
@@ -285,9 +312,52 @@ function createTifoRoomState(options = {}) {
       }
     }
 
+    if (event.type === 'chat-media') return sanitizeChatMediaPayload(payload)
+
     if (event.type === 'clip') return sanitizeClipPayload(payload)
 
     return null
+  }
+
+  function sanitizeChatMediaPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null
+
+    const kind = payload.kind === 'image' ? 'image' : payload.kind === 'voice' ? 'voice' : null
+    if (!kind) return null
+    if (typeof payload.mediaRef !== 'string' || payload.mediaRef.trim() === '') return null
+
+    const size = Number(payload.size)
+    const maxBytes = kind === 'image' ? 10 * 1024 * 1024 : 5 * 1024 * 1024
+    if (!Number.isFinite(size) || size < 1 || size > maxBytes) return null
+
+    const mimeType =
+      typeof payload.mimeType === 'string' && payload.mimeType.trim()
+        ? payload.mimeType.trim().slice(0, 80)
+        : kind === 'image'
+          ? 'image/jpeg'
+          : 'audio/webm'
+
+    if (kind === 'image' && !/^image\/(png|jpe?g|webp|gif)$/i.test(mimeType)) return null
+    if (kind === 'voice' && !/^audio\//i.test(mimeType)) return null
+
+    const durationMs = Number(payload.durationMs)
+    const width = Number(payload.width)
+    const height = Number(payload.height)
+
+    return {
+      caption: typeof payload.caption === 'string' ? payload.caption.trim().slice(0, 140) : '',
+      clientId: typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : null,
+      durationMs:
+        kind === 'voice' && Number.isFinite(durationMs) && durationMs >= 0
+          ? Math.round(durationMs)
+          : null,
+      height: kind === 'image' && Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+      kind,
+      mediaRef: payload.mediaRef.trim().slice(0, 96),
+      mimeType,
+      size: Math.round(size),
+      width: kind === 'image' && Number.isFinite(width) && width > 0 ? Math.round(width) : null
+    }
   }
 
   function sanitizeClipPayload(payload) {

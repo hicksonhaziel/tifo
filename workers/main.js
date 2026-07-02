@@ -50,14 +50,18 @@ function send(type, payload = {}) {
 const roomPeers = new Map()
 const roomControlProtocol = 'tifo-room-control-v1'
 const chantMaxBytes = 2 * 1024 * 1024
+const chatVoiceMaxBytes = 5 * 1024 * 1024
+const chatImageMaxBytes = 10 * 1024 * 1024
 const clipMaxBytes = 64 * 1024 * 1024
 const clipMaxDurationMs = 5 * 60 * 1000
 const clipChunkBytes = 48 * 1024
 let roomTopic = null
 let echoRefreshInterval = null
 const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
+const chatMediaDir = path.join(updaterConfig.dir, 'tifo-chat-media')
 const clipDir = path.join(updaterConfig.dir, 'tifo-clips')
 const pendingChantRequests = new Map()
+const pendingChatMediaRequests = new Map()
 const pendingClipRequests = new Map()
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
@@ -71,6 +75,7 @@ const roomState = createTifoRoomState({
   onJoinRoom: handleJoinRoom,
   onLeaveRoom: handleLeaveRoom,
   onChantSave: handleChantSave,
+  onChatMediaSave: handleChatMediaSave,
   onClipSave: handleClipSave,
   onLocalEvent: handleLocalEvent,
   onRemoteEvent: handleRemoteEvent
@@ -120,8 +125,23 @@ function clipExtension(mimeType) {
   return 'mp4'
 }
 
+function chatMediaExtension(kind, mimeType) {
+  if (kind === 'image') {
+    if (/png/i.test(mimeType)) return 'png'
+    if (/webp/i.test(mimeType)) return 'webp'
+    if (/gif/i.test(mimeType)) return 'gif'
+    return 'jpg'
+  }
+
+  return chantExtension(mimeType)
+}
+
 function chantRoomDir(roomCode) {
   return path.join(chantDir, safeFilePart(roomCode.trim().toUpperCase()))
+}
+
+function chatMediaRoomDir(roomCode) {
+  return path.join(chatMediaDir, safeFilePart(roomCode.trim().toUpperCase()))
 }
 
 function clipRoomDir(roomCode) {
@@ -130,6 +150,18 @@ function clipRoomDir(roomCode) {
 
 function chantFilePath(roomCode, fileId) {
   return path.join(chantRoomDir(roomCode), safeFilePart(fileId))
+}
+
+function chatMediaMaxBytes(kind) {
+  return kind === 'image' ? chatImageMaxBytes : chatVoiceMaxBytes
+}
+
+function chatMediaFileName(mediaRef, kind, mimeType) {
+  return `${safeFilePart(mediaRef)}.${chatMediaExtension(kind, mimeType)}`
+}
+
+function chatMediaFilePath(roomCode, mediaRef, kind, mimeType) {
+  return path.join(chatMediaRoomDir(roomCode), chatMediaFileName(mediaRef, kind, mimeType))
 }
 
 function clipFileName(clipRef, mimeType) {
@@ -245,6 +277,15 @@ function broadcastChantRequest(request) {
   }
 }
 
+function broadcastChatMediaRequest(request) {
+  for (const peer of roomPeers.values()) {
+    sendPeer(peer, {
+      type: 'chat-media:request',
+      ...request
+    })
+  }
+}
+
 function broadcastClipRequest(request) {
   for (const peer of roomPeers.values()) {
     sendPeer(peer, {
@@ -264,6 +305,19 @@ function clearPendingChantRequests(message = 'Chant transfer was cancelled') {
       })
     }
     pendingChantRequests.delete(requestId)
+  }
+}
+
+function clearPendingChatMediaRequests(message = 'Chat media transfer was cancelled') {
+  for (const [requestId, pending] of pendingChatMediaRequests) {
+    clearTimeout(pending.timeout)
+    if (!pending.silent) {
+      send('error', {
+        command: 'chat-media:load',
+        message
+      })
+    }
+    pendingChatMediaRequests.delete(requestId)
   }
 }
 
@@ -530,6 +584,104 @@ async function handleChantSave(command) {
   }
 }
 
+async function handleChatMediaSave(command) {
+  const kind = command.kind === 'image' ? 'image' : command.kind === 'voice' ? 'voice' : null
+  if (!kind) {
+    send('error', {
+      command: 'chat-media:save',
+      message: 'Chat media kind is not valid'
+    })
+    return null
+  }
+
+  const mimeType =
+    typeof command.mimeType === 'string' && command.mimeType.trim()
+      ? command.mimeType.trim().slice(0, 80)
+      : kind === 'image'
+        ? 'image/jpeg'
+        : 'audio/webm'
+
+  if (kind === 'image' && !/^image\/(png|jpe?g|webp|gif)$/i.test(mimeType)) {
+    send('error', {
+      command: 'chat-media:save',
+      message: 'Image type must be PNG, JPEG, WEBP, or GIF'
+    })
+    return null
+  }
+
+  if (kind === 'voice' && !/^audio\//i.test(mimeType)) {
+    send('error', {
+      command: 'chat-media:save',
+      message: 'Voice note must be an audio file'
+    })
+    return null
+  }
+
+  let data = null
+  if (typeof command.bytesBase64 === 'string' && command.bytesBase64.trim()) {
+    data = b4a.from(command.bytesBase64, 'base64')
+  } else if (typeof command.localPath === 'string' && command.localPath.trim()) {
+    try {
+      data = await fs.readFile(command.localPath.trim())
+    } catch (err) {
+      send('error', {
+        command: 'chat-media:save',
+        message: err.message || 'Could not read selected chat media'
+      })
+      return null
+    }
+  }
+
+  if (!data || data.byteLength < 1) {
+    send('error', {
+      command: 'chat-media:save',
+      message: 'Selected chat media is empty'
+    })
+    return null
+  }
+
+  const maxBytes = chatMediaMaxBytes(kind)
+  if (data.byteLength > maxBytes) {
+    send('error', {
+      command: 'chat-media:save',
+      message:
+        kind === 'image' ? 'Image must be 10 MB or smaller' : 'Voice note must be 5 MB or smaller'
+    })
+    return null
+  }
+
+  const mediaRef =
+    typeof command.mediaRef === 'string' && command.mediaRef.trim()
+      ? command.mediaRef.trim().slice(0, 96)
+      : `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+  const dir = chatMediaRoomDir(command.roomCode)
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(chatMediaFilePath(command.roomCode, mediaRef, kind, mimeType), data)
+
+  const durationMs = Number(command.durationMs)
+  const width = Number(command.width)
+  const height = Number(command.height)
+
+  return {
+    caption: typeof command.caption === 'string' ? command.caption.trim().slice(0, 140) : '',
+    clientId:
+      typeof command.clientId === 'string' && command.clientId.trim()
+        ? command.clientId.trim().slice(0, 80)
+        : null,
+    durationMs:
+      kind === 'voice' && Number.isFinite(durationMs) && durationMs > 0
+        ? Math.round(durationMs)
+        : null,
+    height: kind === 'image' && Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+    kind,
+    mediaRef,
+    mimeType,
+    size: data.byteLength,
+    width: kind === 'image' && Number.isFinite(width) && width > 0 ? Math.round(width) : null
+  }
+}
+
 async function handleClipSave(command) {
   if (!command.localPath) {
     send('error', {
@@ -605,6 +757,13 @@ async function loadLocalChant(roomCode, fileId) {
   return { data, fileId: safeFileId }
 }
 
+async function loadLocalChatMedia(roomCode, mediaRef, kind, mimeType) {
+  const cleanRef = safeFilePart(mediaRef)
+  const data = await fs.readFile(chatMediaFilePath(roomCode, cleanRef, kind, mimeType))
+  if (data.byteLength > chatMediaMaxBytes(kind)) throw new Error('Chat media is too large')
+  return { data, mediaRef: cleanRef }
+}
+
 async function loadLocalClip(roomCode, clipRef, mimeType) {
   const filePath = clipFilePath(roomCode, clipRef, mimeType)
   const data = await fs.readFile(filePath)
@@ -620,6 +779,17 @@ function sendLoadedChant({ data, eventId, fileId, mimeType }) {
   })
 }
 
+function sendLoadedChatMedia({ data, eventId, kind, mediaRef, mimeType, size }) {
+  send('chat-media:loaded', {
+    dataUrl: `data:${mimeType};base64,${b4a.toString(data, 'base64')}`,
+    eventId: eventId.slice(0, 96),
+    kind,
+    mediaRef: mediaRef.slice(0, 96),
+    mimeType,
+    size
+  })
+}
+
 function sendLoadedClip({ clipRef, eventId, filePath, mimeType, size }) {
   send('clip:loaded', {
     clipRef: clipRef.slice(0, 96),
@@ -628,6 +798,76 @@ function sendLoadedClip({ clipRef, eventId, filePath, mimeType, size }) {
     mimeType,
     size
   })
+}
+
+function requestRemoteChatMedia({ eventId, kind, mediaRef, mimeType, silent = false, size }) {
+  if (roomPeers.size === 0) {
+    if (!silent) {
+      send('error', {
+        command: 'chat-media:load',
+        message: 'This chat media is not available on this device and no peers are connected'
+      })
+    }
+    return
+  }
+
+  const maxBytes = chatMediaMaxBytes(kind)
+  if (size > maxBytes) {
+    if (!silent) {
+      send('error', {
+        command: 'chat-media:load',
+        message:
+          kind === 'image'
+            ? 'Image is larger than the 10 MB transfer limit'
+            : 'Voice note is larger than the 5 MB transfer limit'
+      })
+    }
+    return
+  }
+
+  const requestId = chantRequestId()
+  const timeout = setTimeout(
+    () => {
+      pendingChatMediaRequests.delete(requestId)
+      if (!silent) {
+        send('error', {
+          command: 'chat-media:load',
+          message: 'Connected peers do not have this chat media yet'
+        })
+      }
+    },
+    kind === 'image' ? 20000 : 10000
+  )
+
+  pendingChatMediaRequests.set(requestId, {
+    chunks: [],
+    eventId,
+    kind,
+    mediaRef,
+    mimeType,
+    receivedBytes: 0,
+    receivedChunks: 0,
+    silent,
+    size,
+    timeout,
+    totalBytes: 0,
+    totalChunks: 0
+  })
+
+  broadcastChatMediaRequest({
+    eventId,
+    kind,
+    mediaRef,
+    mimeType,
+    requestId,
+    size
+  })
+
+  if (!silent) {
+    send('sync:status', {
+      status: kind === 'image' ? 'Requesting image from peers' : 'Requesting voice note from peers'
+    })
+  }
 }
 
 function requestRemoteChant({ eventId, fileId, mimeType, silent = false }) {
@@ -780,6 +1020,64 @@ async function handleChantLoad(command) {
   }
 }
 
+async function handleChatMediaLoad(command) {
+  const room = roomState.state.room
+  if (!room) {
+    send('error', {
+      command: 'chat-media:load',
+      message: 'Join a room before loading chat media'
+    })
+    return
+  }
+
+  if (typeof command.eventId !== 'string' || typeof command.mediaRef !== 'string') {
+    send('error', {
+      command: 'chat-media:load',
+      message: 'Chat media event id and reference are required'
+    })
+    return
+  }
+
+  const kind = command.kind === 'image' ? 'image' : command.kind === 'voice' ? 'voice' : null
+  if (!kind) {
+    send('error', {
+      command: 'chat-media:load',
+      message: 'Chat media kind is required'
+    })
+    return
+  }
+
+  const mediaRef = safeFilePart(command.mediaRef)
+  const mimeType =
+    typeof command.mimeType === 'string' && command.mimeType.trim()
+      ? command.mimeType.trim().slice(0, 80)
+      : kind === 'image'
+        ? 'image/jpeg'
+        : 'audio/webm'
+  const size = Number(command.size)
+
+  try {
+    const { data } = await loadLocalChatMedia(room.code, mediaRef, kind, mimeType)
+    sendLoadedChatMedia({
+      data,
+      eventId: command.eventId,
+      kind,
+      mediaRef,
+      mimeType,
+      size: data.byteLength
+    })
+  } catch {
+    requestRemoteChatMedia({
+      eventId: command.eventId.slice(0, 96),
+      kind,
+      mediaRef,
+      mimeType,
+      silent: command.silent === true,
+      size: Number.isFinite(size) ? Math.round(size) : chatMediaMaxBytes(kind) + 1
+    })
+  }
+}
+
 async function handleClipLoad(command) {
   const room = roomState.state.room
   if (!room) {
@@ -892,6 +1190,151 @@ async function handlePeerChantData(message) {
     eventId: pending.eventId,
     fileId: pending.fileId,
     mimeType: pending.mimeType
+  })
+
+  send('sync:status', {
+    status: `P2P connected: ${roomPeers.size} peer${roomPeers.size === 1 ? '' : 's'}`
+  })
+}
+
+async function handlePeerChatMediaRequest(peer, message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string' || message.requestId.trim() === '') return
+  if (typeof message.eventId !== 'string' || message.eventId.trim() === '') return
+  if (typeof message.mediaRef !== 'string' || message.mediaRef.trim() === '') return
+
+  const kind = message.kind === 'image' ? 'image' : message.kind === 'voice' ? 'voice' : null
+  if (!kind) return
+
+  const mediaRef = safeFilePart(message.mediaRef)
+  const mimeType =
+    typeof message.mimeType === 'string' && message.mimeType.trim()
+      ? message.mimeType.trim().slice(0, 80)
+      : kind === 'image'
+        ? 'image/jpeg'
+        : 'audio/webm'
+
+  try {
+    const { data } = await loadLocalChatMedia(room.code, mediaRef, kind, mimeType)
+    const totalChunks = Math.ceil(data.byteLength / clipChunkBytes)
+    const requestId = message.requestId.slice(0, 96)
+
+    sendPeer(peer, {
+      type: 'chat-media:data:start',
+      eventId: message.eventId.slice(0, 96),
+      kind,
+      mediaRef,
+      mimeType,
+      requestId,
+      totalBytes: data.byteLength,
+      totalChunks
+    })
+
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * clipChunkBytes
+      const chunk = data.subarray(start, Math.min(start + clipChunkBytes, data.byteLength))
+      sendPeer(peer, {
+        type: 'chat-media:data:chunk',
+        bytesBase64: b4a.toString(chunk, 'base64'),
+        index,
+        requestId
+      })
+      if (index % 16 === 0) await Promise.resolve()
+    }
+
+    sendPeer(peer, {
+      type: 'chat-media:data:end',
+      requestId
+    })
+  } catch {
+    // This peer may only have the event. Another connected peer can still answer.
+  }
+}
+
+function handlePeerChatMediaDataStart(message) {
+  if (typeof message.requestId !== 'string') return
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingChatMediaRequests.get(requestId)
+  if (!pending) return
+  if (safeFilePart(message.mediaRef) !== pending.mediaRef) return
+  if (message.kind !== pending.kind) return
+
+  const totalBytes = Number(message.totalBytes)
+  const totalChunks = Number(message.totalChunks)
+  const maxBytes = chatMediaMaxBytes(pending.kind)
+  if (!Number.isFinite(totalBytes) || totalBytes < 1 || totalBytes > maxBytes) return
+  if (!Number.isInteger(totalChunks) || totalChunks < 1) return
+  if (totalChunks > Math.ceil(totalBytes / clipChunkBytes) + 1) return
+
+  pending.chunks = new Array(totalChunks)
+  pending.receivedBytes = 0
+  pending.receivedChunks = 0
+  pending.totalBytes = Math.round(totalBytes)
+  pending.totalChunks = totalChunks
+}
+
+function handlePeerChatMediaDataChunk(message) {
+  if (typeof message.requestId !== 'string') return
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingChatMediaRequests.get(requestId)
+  if (!pending || pending.totalChunks < 1) return
+  if (typeof message.bytesBase64 !== 'string') return
+  if (message.bytesBase64.length > Math.ceil(clipChunkBytes * 1.4)) return
+
+  const index = Number(message.index)
+  if (!Number.isInteger(index) || index < 0 || index >= pending.totalChunks) return
+  if (pending.chunks[index]) return
+
+  const chunk = b4a.from(message.bytesBase64, 'base64')
+  if (chunk.byteLength < 1 || chunk.byteLength > clipChunkBytes) return
+  if (pending.receivedBytes + chunk.byteLength > chatMediaMaxBytes(pending.kind)) return
+
+  pending.chunks[index] = chunk
+  pending.receivedBytes += chunk.byteLength
+  pending.receivedChunks += 1
+}
+
+async function handlePeerChatMediaDataEnd(message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string') return
+
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingChatMediaRequests.get(requestId)
+  if (!pending) return
+  if (pending.receivedChunks !== pending.totalChunks) return
+  if (pending.receivedBytes !== pending.totalBytes) return
+
+  clearTimeout(pending.timeout)
+  pendingChatMediaRequests.delete(requestId)
+
+  const data = b4a.concat(pending.chunks)
+  if (data.byteLength !== pending.totalBytes || data.byteLength > chatMediaMaxBytes(pending.kind)) {
+    return
+  }
+
+  try {
+    await fs.mkdir(chatMediaRoomDir(room.code), { recursive: true })
+    await fs.writeFile(
+      chatMediaFilePath(room.code, pending.mediaRef, pending.kind, pending.mimeType),
+      data
+    )
+  } catch (err) {
+    send('error', {
+      command: 'chat-media:cache',
+      message: err.message || 'Could not cache chat media locally'
+    })
+    return
+  }
+
+  sendLoadedChatMedia({
+    data,
+    eventId: pending.eventId,
+    kind: pending.kind,
+    mediaRef: pending.mediaRef,
+    mimeType: pending.mimeType,
+    size: data.byteLength
   })
 
   send('sync:status', {
@@ -1078,6 +1521,26 @@ async function handlePeerMessage(peer, message) {
     return
   }
 
+  if (message.type === 'chat-media:request') {
+    await handlePeerChatMediaRequest(peer, message)
+    return
+  }
+
+  if (message.type === 'chat-media:data:start') {
+    handlePeerChatMediaDataStart(message)
+    return
+  }
+
+  if (message.type === 'chat-media:data:chunk') {
+    handlePeerChatMediaDataChunk(message)
+    return
+  }
+
+  if (message.type === 'chat-media:data:end') {
+    await handlePeerChatMediaDataEnd(message)
+    return
+  }
+
   if (message.type === 'clip:request') {
     await handlePeerClipRequest(peer, message)
     return
@@ -1237,6 +1700,7 @@ function joinRoomNetwork(room) {
 function leaveRoomNetwork() {
   stopEchoRefresh()
   clearPendingChantRequests()
+  clearPendingChatMediaRequests()
   clearPendingClipRequests()
 
   if (roomTopic) {
@@ -1303,6 +1767,11 @@ pipe.on('data', async (data) => {
 
     if (command.type === 'chant:load') {
       await handleChantLoad(command)
+      return
+    }
+
+    if (command.type === 'chat-media:load') {
+      await handleChatMediaLoad(command)
       return
     }
 

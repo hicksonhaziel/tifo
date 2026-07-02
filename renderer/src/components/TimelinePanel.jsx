@@ -89,6 +89,9 @@ function TimelineEvent({ actions, derived, event, state }) {
 }
 
 function TimelineEventBody({ actions, derived, event, meta }) {
+  if (event.type === 'chat-media') {
+    return <ChatMediaEvent actions={actions} derived={derived} event={event} />
+  }
   if (event.type === 'clip') {
     return <ClipEvent actions={actions} derived={derived} event={event} />
   }
@@ -96,6 +99,54 @@ function TimelineEventBody({ actions, derived, event, meta }) {
     return <ChantEvent actions={actions} derived={derived} event={event} />
   }
   return <p>{meta.text}</p>
+}
+
+function ChatMediaEvent({ actions, derived, event }) {
+  const mediaUrl = derived.chatMediaUrls.get(event.id)
+  const isLoading = derived.pendingChatMediaLoads.has(event.id)
+  const payload = event.payload
+
+  if (payload.kind === 'image') {
+    return (
+      <div className='chat-media-message image'>
+        <p>
+          {payload.caption || 'Match photo'} · {formatBytes(payload.size)}
+        </p>
+        {mediaUrl ? (
+          <img src={mediaUrl} alt={payload.caption || 'Shared match photo'} />
+        ) : (
+          <button
+            className='chat-media-load'
+            type='button'
+            disabled={isLoading}
+            onClick={() => actions.loadChatMedia(event)}
+          >
+            {isLoading ? 'Preparing image' : 'Load image'}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className='chat-media-message voice'>
+      <p>
+        Voice note · {formatDuration(payload.durationMs || 0)} · {formatBytes(payload.size)}
+      </p>
+      {mediaUrl ? (
+        <audio controls preload='metadata' src={mediaUrl}></audio>
+      ) : (
+        <button
+          className='chat-media-load'
+          type='button'
+          disabled={isLoading}
+          onClick={() => actions.loadChatMedia(event)}
+        >
+          {isLoading ? 'Preparing voice note' : 'Load voice note'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function ChantEvent({ actions, derived, event }) {

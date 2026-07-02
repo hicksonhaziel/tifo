@@ -30,6 +30,14 @@ export function eventMeta(event) {
     }
   }
 
+  if (event.type === 'chat-media') {
+    const kind = event.payload.kind === 'image' ? 'Photo' : 'Voice note'
+    return {
+      label: kind,
+      text: event.payload.caption || kind
+    }
+  }
+
   if (event.type === 'reaction') {
     const reaction = reactionTheme(event.payload.type)
     return {
@@ -81,6 +89,7 @@ export function roomMetrics(appState) {
     chats: appState.events.filter((event) => event.type === 'chat').length,
     chants: appState.events.filter((event) => event.type === 'chant').length,
     clips: appState.events.filter((event) => event.type === 'clip').length,
+    media: appState.events.filter((event) => event.type === 'chat-media').length,
     pending: Math.max(appState.offline.pendingCount, pendingEvents.length),
     reactions: appState.events.filter((event) => event.type === 'reaction').length,
     saved: appState.events.filter((event) => event.status === 'stored').length,

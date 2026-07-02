@@ -3,12 +3,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CHANT_MAX_MS,
   CHANT_MIN_MS,
+  CHAT_IMAGE_MAX_BYTES,
+  CHAT_VOICE_MAX_BYTES,
   CLIP_MAX_BYTES,
   CLIP_MAX_DURATION_MS,
   REPLAY_DURATION_MS,
   REPLAY_MIN_STEP_MS,
   REPLAY_WINDOW_AFTER_MS,
   REPLAY_WINDOW_BEFORE_MS,
+  VOICE_NOTE_MAX_MS,
+  VOICE_NOTE_MIN_MS,
   reactionTypes
 } from '../tifo/constants.js'
 import {
@@ -34,6 +38,13 @@ import {
   reactionTheme,
   roomMetrics
 } from '../tifo/domain.js'
+import {
+  imageFileSupported,
+  imageMimeType,
+  mediaRefForBlob,
+  mediaRefForFile,
+  readImageDimensions
+} from '../tifo/media.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
@@ -47,10 +58,14 @@ export function useTifoController() {
 
   const chantAudioUrlsRef = useRef(new Map())
   const chantPrefetchIdsRef = useRef(new Set())
+  const chatMediaUrlsRef = useRef(new Map())
+  const chatMediaPrefetchIdsRef = useRef(new Set())
   const clipPrefetchIdsRef = useRef(new Set())
   const clipPreviewUrlsRef = useRef(new Map())
   const pendingChantLoadsRef = useRef(new Map())
   const pendingChantUrlsRef = useRef(new Map())
+  const pendingChatMediaLoadsRef = useRef(new Map())
+  const pendingChatMediaPreviewsRef = useRef(new Map())
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
   const seenEffectEventIdsRef = useRef(new Set())
@@ -60,6 +75,10 @@ export function useTifoController() {
   const discardActiveChantRef = useRef(false)
   const chantTickTimerRef = useRef(null)
   const chantAutoStopTimerRef = useRef(null)
+  const activeVoiceRecorderRef = useRef(null)
+  const activeVoiceStreamRef = useRef(null)
+  const voiceTickTimerRef = useRef(null)
+  const voiceAutoStopTimerRef = useRef(null)
   const activeReplayAudioRef = useRef(null)
   const activeReplaySessionRef = useRef(null)
   const fallbackChantUrlRef = useRef('')
@@ -91,6 +110,15 @@ export function useTifoController() {
     pending.resolve(dataUrl)
   }
 
+  function resolvePendingChatMediaLoad(eventId, dataUrl = '') {
+    const pending = pendingChatMediaLoadsRef.current.get(eventId)
+    if (!pending) return
+
+    clearTimeout(pending.timeout)
+    pendingChatMediaLoadsRef.current.delete(eventId)
+    pending.resolve(dataUrl)
+  }
+
   function resolvePendingClipLoad(eventId, videoUrl = '') {
     const pending = pendingClipLoadsRef.current.get(eventId)
     if (!pending) return
@@ -106,6 +134,21 @@ export function useTifoController() {
 
     chantAudioUrlsRef.current.set(event.id, pendingChantUrlsRef.current.get(clientId))
     pendingChantUrlsRef.current.delete(clientId)
+  }
+
+  function attachPendingChatMediaPreview(event) {
+    const clientId = event?.payload?.clientId
+    if (
+      event?.type !== 'chat-media' ||
+      !clientId ||
+      !pendingChatMediaPreviewsRef.current.has(clientId)
+    ) {
+      return
+    }
+
+    const preview = pendingChatMediaPreviewsRef.current.get(clientId)
+    chatMediaUrlsRef.current.set(event.id, preview.url)
+    pendingChatMediaPreviewsRef.current.delete(clientId)
   }
 
   function attachPendingClipPreview(event) {
@@ -140,6 +183,22 @@ export function useTifoController() {
     pendingClipPreviewsRef.current.clear()
   }
 
+  function clearChatMediaUrls() {
+    for (const url of chatMediaUrlsRef.current.values()) {
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+    }
+    for (const preview of pendingChatMediaPreviewsRef.current.values()) {
+      if (preview.url?.startsWith('blob:')) URL.revokeObjectURL(preview.url)
+    }
+    for (const pending of pendingChatMediaLoadsRef.current.values()) {
+      clearTimeout(pending.timeout)
+      pending.resolve('')
+    }
+    chatMediaUrlsRef.current.clear()
+    pendingChatMediaLoadsRef.current.clear()
+    pendingChatMediaPreviewsRef.current.clear()
+  }
+
   function requestChantLoad(event, options = {}) {
     if (chantAudioUrlsRef.current.has(event.id)) return
     sendWorkerCommand('chant:load', {
@@ -147,6 +206,18 @@ export function useTifoController() {
       fileId: event.payload.fileId,
       mimeType: event.payload.mimeType,
       silent: options.silent === true
+    })
+  }
+
+  function requestChatMediaLoad(event, options = {}) {
+    if (chatMediaUrlsRef.current.has(event.id)) return
+    sendWorkerCommand('chat-media:load', {
+      eventId: event.id,
+      kind: event.payload.kind,
+      mediaRef: event.payload.mediaRef,
+      mimeType: event.payload.mimeType,
+      silent: options.silent === true,
+      size: event.payload.size
     })
   }
 
@@ -194,6 +265,39 @@ export function useTifoController() {
     return promise
   }
 
+  function loadChatMedia(event, options = {}) {
+    if (chatMediaUrlsRef.current.has(event.id)) {
+      return Promise.resolve(chatMediaUrlsRef.current.get(event.id))
+    }
+    if (!event.payload?.mediaRef) return Promise.resolve('')
+    if (pendingChatMediaLoadsRef.current.has(event.id)) {
+      return pendingChatMediaLoadsRef.current.get(event.id).promise
+    }
+
+    let resolveLoad = null
+    const promise = new Promise((resolve) => {
+      resolveLoad = resolve
+    })
+    const timeoutMs = event.payload.kind === 'image' ? 22000 : 12000
+    const timeout = setTimeout(() => {
+      pendingChatMediaLoadsRef.current.delete(event.id)
+      if (options.silent === true && !chatMediaUrlsRef.current.has(event.id)) {
+        chatMediaPrefetchIdsRef.current.delete(event.id)
+      }
+      resolveLoad('')
+      if (stateRef.current.view === 'room') refresh()
+    }, timeoutMs)
+
+    pendingChatMediaLoadsRef.current.set(event.id, {
+      promise,
+      resolve: resolveLoad,
+      timeout
+    })
+    requestChatMediaLoad(event, options)
+    if (options.silent !== true && stateRef.current.view === 'room') refresh()
+    return promise
+  }
+
   function loadClipVideo(event, options = {}) {
     const existingUrl = clipPreviewUrlForEvent(event)
     if (existingUrl) return Promise.resolve(existingUrl)
@@ -237,6 +341,17 @@ export function useTifoController() {
     loadChantAudio(event, { silent: true })
   }
 
+  function prefetchChatMedia(event) {
+    if (event?.type !== 'chat-media' || !event.payload?.mediaRef) return
+    if (chatMediaUrlsRef.current.has(event.id) || pendingChatMediaLoadsRef.current.has(event.id)) {
+      return
+    }
+    if (chatMediaPrefetchIdsRef.current.has(event.id)) return
+
+    chatMediaPrefetchIdsRef.current.add(event.id)
+    loadChatMedia(event, { silent: true })
+  }
+
   function prefetchClipVideo(event) {
     if (event?.type !== 'clip' || !event.payload?.clipRef) return
     if (clipPreviewUrlForEvent(event) || pendingClipLoadsRef.current.has(event.id)) return
@@ -248,6 +363,10 @@ export function useTifoController() {
 
   function prefetchChantAudios(events) {
     for (const event of events) prefetchChantAudio(event)
+  }
+
+  function prefetchChatMediaEvents(events) {
+    for (const event of events) prefetchChatMedia(event)
   }
 
   function prefetchClipVideos(events) {
@@ -295,8 +414,10 @@ export function useTifoController() {
 
   function upsertEvent(event) {
     attachPendingChantUrl(event)
+    attachPendingChatMediaPreview(event)
     attachPendingClipPreview(event)
     prefetchChantAudio(event)
+    prefetchChatMedia(event)
     prefetchClipVideo(event)
 
     setAppState((state) => {
@@ -341,6 +462,13 @@ export function useTifoController() {
           syncStatus: message.syncStatus,
           events: message.events || [],
           chatDraft: '',
+          chatMedia: {
+            imageError: '',
+            imageStatus: 'idle',
+            voiceElapsedMs: 0,
+            voiceError: '',
+            voiceStatus: 'idle'
+          },
           clipDraft: clipDraftIdle(),
           offline: {
             detail: 'Network searching',
@@ -360,9 +488,11 @@ export function useTifoController() {
         }))
         seenEffectEventIdsRef.current.clear()
         chantPrefetchIdsRef.current.clear()
+        chatMediaPrefetchIdsRef.current.clear()
         clipPrefetchIdsRef.current.clear()
         rememberEffectEvents(message.events || [])
         prefetchChantAudios(message.events || [])
+        prefetchChatMediaEvents(message.events || [])
         prefetchClipVideos(message.events || [])
         break
       case 'room:left':
@@ -374,6 +504,13 @@ export function useTifoController() {
           syncStatus: message.syncStatus || 'Worker ready',
           events: message.events || [],
           chatDraft: '',
+          chatMedia: {
+            imageError: '',
+            imageStatus: 'idle',
+            voiceElapsedMs: 0,
+            voiceError: '',
+            voiceStatus: 'idle'
+          },
           clipDraft: clipDraftIdle(),
           offline: {
             detail: 'Network searching',
@@ -392,9 +529,12 @@ export function useTifoController() {
           lastError: ''
         }))
         clearClipPreviewUrls()
+        clearChatMediaUrls()
         stopChantRecording({ discard: true })
+        stopVoiceNoteRecording({ discard: true })
         resetReplayPreview()
         chantPrefetchIdsRef.current.clear()
+        chatMediaPrefetchIdsRef.current.clear()
         clipPrefetchIdsRef.current.clear()
         seenEffectEventIdsRef.current.clear()
         break
@@ -405,6 +545,7 @@ export function useTifoController() {
         }))
         if (message.count > 0) {
           prefetchChantAudios(stateRef.current.events)
+          prefetchChatMediaEvents(stateRef.current.events)
           prefetchClipVideos(stateRef.current.events)
         }
         break
@@ -439,6 +580,7 @@ export function useTifoController() {
         if (eventListSignature(stateRef.current.events) === eventListSignature(events)) return
         for (const event of events) {
           attachPendingChantUrl(event)
+          attachPendingChatMediaPreview(event)
           attachPendingClipPreview(event)
         }
         applyLiveEffects(events)
@@ -447,12 +589,18 @@ export function useTifoController() {
           events
         }))
         prefetchChantAudios(events)
+        prefetchChatMediaEvents(events)
         prefetchClipVideos(events)
         break
       }
       case 'chant:loaded':
         chantAudioUrlsRef.current.set(message.eventId, message.dataUrl)
         resolvePendingChantLoad(message.eventId, message.dataUrl)
+        refresh()
+        break
+      case 'chat-media:loaded':
+        chatMediaUrlsRef.current.set(message.eventId, message.dataUrl)
+        resolvePendingChatMediaLoad(message.eventId, message.dataUrl)
         refresh()
         break
       case 'clip:loaded': {
@@ -707,6 +855,331 @@ export function useTifoController() {
     await saveChantBlob({ blob, durationMs, mimeType })
   }
 
+  function resetVoiceTimers() {
+    if (voiceTickTimerRef.current) clearInterval(voiceTickTimerRef.current)
+    if (voiceAutoStopTimerRef.current) clearTimeout(voiceAutoStopTimerRef.current)
+    voiceTickTimerRef.current = null
+    voiceAutoStopTimerRef.current = null
+  }
+
+  function releaseVoiceStream() {
+    if (!activeVoiceStreamRef.current) return
+    for (const track of activeVoiceStreamRef.current.getTracks()) track.stop()
+    activeVoiceStreamRef.current = null
+  }
+
+  async function saveVoiceNoteBlob({ blob, durationMs, mimeType }) {
+    if (blob.size < 1) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceError: 'Voice note is empty',
+          voiceStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    if (blob.size > CHAT_VOICE_MAX_BYTES) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceError: 'Voice note must be 5 MB or smaller',
+          voiceStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    const url = URL.createObjectURL(blob)
+    const mediaRef = mediaRefForBlob(blob, 'voice')
+    const bytesBase64 = await blobToBase64(blob)
+
+    pendingChatMediaPreviewsRef.current.set(clientId, { url })
+
+    setAppState((state) => ({
+      ...state,
+      chatMedia: {
+        ...state.chatMedia,
+        voiceElapsedMs: durationMs,
+        voiceError: '',
+        voiceStatus: 'saving'
+      }
+    }))
+
+    sendWorkerCommand('chat-media:save', {
+      bytesBase64,
+      clientId,
+      durationMs,
+      kind: 'voice',
+      mediaRef,
+      mimeType,
+      size: blob.size
+    })
+
+    setAppState((state) => ({
+      ...state,
+      chatMedia: {
+        ...state.chatMedia,
+        voiceElapsedMs: 0,
+        voiceError: '',
+        voiceStatus: 'idle'
+      }
+    }))
+  }
+
+  async function startVoiceNoteRecording() {
+    if (!recordingSupported()) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: 0,
+          voiceError: 'Microphone recording is not available in this runtime',
+          voiceStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = preferredChantMimeType()
+      const chunks = []
+      const recorder = mimeType
+        ? new window.MediaRecorder(stream, { mimeType })
+        : new window.MediaRecorder(stream)
+      const startedAt = Date.now()
+
+      activeVoiceStreamRef.current = stream
+      activeVoiceRecorderRef.current = recorder
+
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      })
+
+      recorder.addEventListener('stop', () => {
+        const durationMs = Date.now() - startedAt
+        releaseVoiceStream()
+        if (durationMs < VOICE_NOTE_MIN_MS) {
+          setAppState((state) => ({
+            ...state,
+            chatMedia: {
+              ...state.chatMedia,
+              voiceElapsedMs: durationMs,
+              voiceError: 'Hold for at least 1 second',
+              voiceStatus: 'error'
+            }
+          }))
+          return
+        }
+
+        const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' })
+        saveVoiceNoteBlob({
+          blob,
+          durationMs,
+          mimeType: recorder.mimeType || mimeType || 'audio/webm'
+        }).catch((err) => {
+          setAppState((state) => ({
+            ...state,
+            chatMedia: {
+              ...state.chatMedia,
+              voiceElapsedMs: 0,
+              voiceError: err.message || 'Could not save voice note',
+              voiceStatus: 'error'
+            }
+          }))
+        })
+      })
+
+      recorder.start()
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: 0,
+          voiceError: '',
+          voiceStatus: 'recording'
+        }
+      }))
+
+      voiceTickTimerRef.current = setInterval(() => {
+        setAppState((state) => ({
+          ...state,
+          chatMedia: {
+            ...state.chatMedia,
+            voiceElapsedMs: Math.min(Date.now() - startedAt, VOICE_NOTE_MAX_MS)
+          }
+        }))
+      }, 500)
+
+      voiceAutoStopTimerRef.current = setTimeout(() => {
+        stopVoiceNoteRecording()
+      }, VOICE_NOTE_MAX_MS)
+    } catch (err) {
+      releaseVoiceStream()
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: 0,
+          voiceError: err.message || 'Microphone permission failed',
+          voiceStatus: 'error'
+        }
+      }))
+    }
+  }
+
+  function stopVoiceNoteRecording(options = {}) {
+    resetVoiceTimers()
+
+    const recorder = activeVoiceRecorderRef.current
+    activeVoiceRecorderRef.current = null
+
+    if (!recorder) {
+      releaseVoiceStream()
+      if (options.discard) return
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: 0,
+          voiceError: '',
+          voiceStatus: 'idle'
+        }
+      }))
+      return
+    }
+
+    if (options.discard) {
+      if (recorder.state !== 'inactive') recorder.stop()
+      return
+    }
+
+    const elapsedMs = stateRef.current.chatMedia.voiceElapsedMs
+    if (elapsedMs < VOICE_NOTE_MIN_MS) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: elapsedMs,
+          voiceError: 'Hold for at least 1 second',
+          voiceStatus: 'error'
+        }
+      }))
+      if (recorder.state !== 'inactive') recorder.stop()
+      return
+    }
+
+    setAppState((state) => ({
+      ...state,
+      chatMedia: {
+        ...state.chatMedia,
+        voiceElapsedMs: elapsedMs,
+        voiceError: '',
+        voiceStatus: 'saving'
+      }
+    }))
+    if (recorder.state !== 'inactive') recorder.stop()
+  }
+
+  async function saveChatImage(file, caption = '') {
+    if (stateRef.current.chatMedia.imageStatus === 'saving') return
+
+    if (!imageFileSupported(file)) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: 'Select a PNG, JPEG, WEBP, or GIF image',
+          imageStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    if (!Number.isFinite(file.size) || file.size < 1) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: 'Selected image is empty',
+          imageStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    if (file.size > CHAT_IMAGE_MAX_BYTES) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: 'Image must be 10 MB or smaller',
+          imageStatus: 'error'
+        }
+      }))
+      return
+    }
+
+    let objectUrl = ''
+    try {
+      objectUrl = URL.createObjectURL(file)
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: '',
+          imageStatus: 'saving'
+        }
+      }))
+
+      const [mediaRef, dimensions] = await Promise.all([
+        mediaRefForFile(file, 'image'),
+        readImageDimensions(objectUrl)
+      ])
+      const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+      const localPath = localPathForFile(file)
+
+      pendingChatMediaPreviewsRef.current.set(clientId, { url: objectUrl })
+
+      sendWorkerCommand('chat-media:save', {
+        caption: caption.trim().slice(0, 140),
+        clientId,
+        height: dimensions?.height || null,
+        kind: 'image',
+        localPath,
+        mediaRef,
+        mimeType: imageMimeType(file),
+        size: file.size,
+        width: dimensions?.width || null
+      })
+
+      setAppState((state) => ({
+        ...state,
+        chatDraft: caption.trim() ? '' : state.chatDraft,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: '',
+          imageStatus: 'idle'
+        }
+      }))
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: err.message || 'Could not send image',
+          imageStatus: 'error'
+        }
+      }))
+    }
+  }
+
   async function saveClipMetadata(file) {
     if (stateRef.current.clipDraft.status === 'saving') return
 
@@ -855,6 +1328,7 @@ export function useTifoController() {
     if (event.type === 'chant') return 'cold'
     if (event.type === 'clip') return 'warning'
     if (event.type === 'chat') return 'clean'
+    if (event.type === 'chat-media') return event.payload.kind === 'image' ? 'warning' : 'cold'
     return 'warning'
   }
 
@@ -1194,9 +1668,12 @@ export function useTifoController() {
       mountedRef.current = false
       cleanupWorker?.()
       resetChantTimers()
+      resetVoiceTimers()
       releaseChantStream()
+      releaseVoiceStream()
       clearReplayTimers()
       stopActiveReplayAudio()
+      clearChatMediaUrls()
       clearClipPreviewUrls()
       if (fallbackChantUrlRef.current) URL.revokeObjectURL(fallbackChantUrlRef.current)
     }
@@ -1211,9 +1688,11 @@ export function useTifoController() {
       joinRoom,
       leaveRoom,
       loadChantAudio,
+      loadChatMedia,
       loadClipVideo,
       replayFrom,
       resetReplayPreview,
+      saveChatImage,
       saveClipMetadata,
       saveFallbackChant,
       sendChat,
@@ -1222,14 +1701,18 @@ export function useTifoController() {
       setClipCaption,
       setOffline,
       startChantRecording,
-      stopChantRecording
+      startVoiceNoteRecording,
+      stopChantRecording,
+      stopVoiceNoteRecording
     },
     derived: {
       chantAudioUrls: chantAudioUrlsRef.current,
+      chatMediaUrls: chatMediaUrlsRef.current,
       clipPreviewUrlForEvent,
       eventStatus: (event) => eventStatus(event, appState),
       metrics,
       pendingChantLoads: pendingChantLoadsRef.current,
+      pendingChatMediaLoads: pendingChatMediaLoadsRef.current,
       pendingClipLoads: pendingClipLoadsRef.current
     },
     state: appState
