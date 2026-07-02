@@ -151,7 +151,7 @@ function renderHome() {
         <div class="panel-heading">
           <p class="eyebrow">Join room</p>
           <h2 id="join-title">Enter a match room</h2>
-          <p class="panel-copy">Start with a local worker preview. P2P sync comes next.</p>
+          <p class="panel-copy">Join a worker-backed P2P match room.</p>
         </div>
         <form id="join-form" class="join-form">
           <label>
@@ -285,7 +285,7 @@ function renderRoom() {
               <h2 id="chat-title">Terrace chat</h2>
               <p>Messages round-trip through the worker.</p>
             </div>
-            <span class="local-pill">Worker local</span>
+            <span class="local-pill">P2P room</span>
           </div>
           <div class="chat-list" id="chat-list">
             ${renderChatItems()}
@@ -341,7 +341,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="timeline-title">Echo timeline</h2>
-              <p>Worker-owned local event stream.</p>
+              <p>In-memory shared event stream.</p>
             </div>
             <span>${state.events.length} events</span>
           </div>

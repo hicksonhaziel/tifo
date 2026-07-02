@@ -2,6 +2,9 @@ function createTifoRoomState(options = {}) {
   const send = options.send
   const now = options.now || Date.now
   const random = options.random || Math.random
+  const onJoinRoom = options.onJoinRoom || noop
+  const onLeaveRoom = options.onLeaveRoom || noop
+  const onLocalEvent = options.onLocalEvent || noop
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -12,8 +15,11 @@ function createTifoRoomState(options = {}) {
       nickname: ''
     },
     room: null,
-    events: []
+    events: [],
+    seenEventIds: new Set()
   }
+
+  function noop() {}
 
   function roomTitle(roomCode) {
     return roomCode.trim().replace(/-/g, ' ').replace(/\s+/g, ' ').toUpperCase()
@@ -33,8 +39,10 @@ function createTifoRoomState(options = {}) {
 
   function addEvent(type, payload) {
     const event = createEvent(type, payload)
+    state.seenEventIds.add(event.id)
     state.events.unshift(event)
     send('event:added', { event })
+    onLocalEvent(event)
   }
 
   function sendError(command, message) {
@@ -77,10 +85,12 @@ function createTifoRoomState(options = {}) {
       title: roomTitle(roomCode)
     }
     state.events = []
+    state.seenEventIds.clear()
 
     const event = createEvent('system', {
       text: `${state.profile.nickname} entered ${state.room.title}`
     })
+    state.seenEventIds.add(event.id)
     state.events.unshift(event)
 
     send('room:joined', {
@@ -92,16 +102,20 @@ function createTifoRoomState(options = {}) {
     })
     send('peer:count', { count: 0 })
     send('sync:status', { status: 'Local worker preview' })
+    onJoinRoom(state.room)
   }
 
   function handleRoomLeave() {
+    const previousRoom = state.room
     state.room = null
     state.events = []
+    state.seenEventIds.clear()
     send('room:left', {
       syncStatus: 'Worker ready',
       events: []
     })
     send('peer:count', { count: 0 })
+    onLeaveRoom(previousRoom)
   }
 
   function handleChatSend(command) {
@@ -167,7 +181,66 @@ function createTifoRoomState(options = {}) {
     }
   }
 
+  function sanitizeRemotePayload(event) {
+    const payload =
+      event && typeof event.payload === 'object' && event.payload !== null ? event.payload : {}
+
+    if (event.type === 'chat') {
+      if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
+      return {
+        text: payload.text.trim().slice(0, 180)
+      }
+    }
+
+    if (event.type === 'reaction') {
+      if (typeof payload.type !== 'string' || typeof payload.label !== 'string') return null
+      return {
+        type: payload.type.trim().slice(0, 32),
+        label: payload.label.trim().slice(0, 48)
+      }
+    }
+
+    if (event.type === 'system') {
+      if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
+      return {
+        text: payload.text.trim().slice(0, 180)
+      }
+    }
+
+    return null
+  }
+
+  function addRemoteEvent(event) {
+    if (!state.room || !event || typeof event !== 'object') return null
+    if (typeof event.id !== 'string' || event.id.trim() === '') return null
+    if (state.seenEventIds.has(event.id)) return null
+    if (event.room !== state.room.code) return null
+
+    const payload = sanitizeRemotePayload(event)
+    if (!payload) return null
+
+    const timestamp = Number.isFinite(event.timestamp) ? event.timestamp : now()
+    const sender =
+      typeof event.sender === 'string' && event.sender.trim() ? event.sender.trim() : 'Remote fan'
+
+    const cleanEvent = {
+      id: event.id.slice(0, 96),
+      type: event.type,
+      sender: sender.slice(0, 24),
+      timestamp,
+      room: state.room.code,
+      payload,
+      status: 'remote'
+    }
+
+    state.seenEventIds.add(cleanEvent.id)
+    state.events.unshift(cleanEvent)
+    send('event:added', { event: cleanEvent })
+    return cleanEvent
+  }
+
   return {
+    addRemoteEvent,
     handleCommand,
     state
   }

@@ -11,7 +11,10 @@ Current Phase
 Phase 0 is complete.
 Phase 1 is complete.
 Phase 2 is complete.
-Next phase is Phase 3: First Real P2P Room.
+Phase 3 code is implemented locally and needs manual multi-window P2P testing
+before commit/push.
+Next phase after Phase 3 is verified is Phase 4: Local Persistence With
+Hypercore/Corestore.
 
 What Is Implemented Now
 - Repo is based on Holepunch's hello-pear-electron starter.
@@ -27,11 +30,18 @@ What Is Implemented Now
 - Fake local room join/leave now happens through workers/main.js.
 - Chat, reaction, and Echo replay preview events round-trip through the worker.
 - Unknown worker commands return structured error messages.
+- Hyperswarm room discovery and framed peer-to-peer JSON event exchange are
+  implemented locally for Phase 3.
+- Room code is converted to a deterministic 32-byte Hyperswarm topic.
+- Local events are broadcast to connected peers.
+- Remote events are sanitized, deduplicated by id, and displayed in the timeline.
+- Leaving a room closes the active room sockets because Hyperswarm leave() does
+  not close existing connections by itself.
 - BUILD.md and PLAN.md are private local planning files and ignored by git.
 - package.json uses CommonJS and vanilla JS/CSS. No Tailwind and no TypeScript yet.
 
 What Is Not Implemented Yet
-- No Hyperswarm room messaging between app instances yet.
+- Phase 3 has not been manually verified with two windows yet.
 - No Hypercore/Corestore persistence for TIFO events yet.
 - No Autobase merged Echo timeline yet.
 - No audio chant recording yet.
@@ -70,6 +80,7 @@ Important Files
 - electron/preload.js: exposes safe window.bridge methods to renderer.
 - workers/main.js: Bare worker, PearRuntime updater, future P2P backend.
 - workers/tifo-room-state.js: testable local Phase 2 room command/event state.
+- workers/main.js also owns Phase 3 Hyperswarm room networking for now.
 - renderer/app.js: current UI and worker-backed local preview flow.
 - renderer/styles.css: current Phase 1 styling.
 - assets/brand/: extracted TIFO brand assets.
@@ -152,14 +163,24 @@ Phase 3 Plan
 Goal: prove two or three TIFO instances can discover each other and exchange
 basic messages through Hyperswarm.
 
-Phase 3 implementation direction:
-- Convert room code to a stable binary discovery topic.
-- Join Hyperswarm from the worker, not the renderer.
-- Track active peer connections in the worker.
-- Exchange JSON event envelopes over peer connections.
-- Keep peer count visible in renderer.
-- Deduplicate events by id.
+Phase 3 implementation status:
+- Convert room code to a stable binary discovery topic. Implemented.
+- Join Hyperswarm from the worker, not the renderer. Implemented.
+- Track active peer connections in the worker. Implemented.
+- Exchange JSON event envelopes over peer connections. Implemented.
+- Keep peer count visible in renderer. Implemented.
+- Deduplicate events by id. Implemented.
 - Keep persistence out of Phase 3 unless absolutely needed; persistence is Phase 4.
+  Still true.
+
+Phase 3 manual test needed before commit/push:
+- Terminal 1: npm start -- --storage /tmp/tifo-amina
+- Terminal 2: npm start -- --storage /tmp/tifo-yassine
+- In both windows, join room MAR-DEMO-R16 with different fan names.
+- Confirm both windows show P2P connected with peer count 1.
+- Send a chat from Amina and confirm it appears in Yassine.
+- Send a chat/reaction from Yassine and confirm it appears in Amina.
+- Leave one room and confirm the other peer count drops.
 
 Important Product Rules
 - No backend server.
