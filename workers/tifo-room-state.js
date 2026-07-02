@@ -5,6 +5,7 @@ function createTifoRoomState(options = {}) {
   const onJoinRoom = options.onJoinRoom || noop
   const onLeaveRoom = options.onLeaveRoom || noop
   const onLocalEvent = options.onLocalEvent || noop
+  const onRemoteEvent = options.onRemoteEvent || noop
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -26,14 +27,17 @@ function createTifoRoomState(options = {}) {
   }
 
   function createEvent(type, payload) {
+    const createdAt = now()
     return {
-      id: `${now().toString(36)}-${random().toString(36).slice(2)}`,
+      id: `${createdAt.toString(36)}-${random().toString(36).slice(2)}`,
       type,
       sender: state.profile.nickname || 'Local fan',
-      timestamp: now(),
+      timestamp: createdAt,
       room: state.room?.code || null,
       payload,
-      status: 'local'
+      status: 'local',
+      localCreatedAt: createdAt,
+      version: 1
     }
   }
 
@@ -74,7 +78,7 @@ function createTifoRoomState(options = {}) {
     state.profile.nickname = nickname.slice(0, 24)
   }
 
-  function handleRoomJoin(command) {
+  async function handleRoomJoin(command) {
     const nickname = requireString(command.type, command.nickname, 'nickname')
     const roomCode = requireString(command.type, command.roomCode, 'roomCode')
     if (!nickname || !roomCode) return
@@ -87,6 +91,9 @@ function createTifoRoomState(options = {}) {
     state.events = []
     state.seenEventIds.clear()
 
+    const storedEvents = await onJoinRoom(state.room)
+    mergeStoredEvents(storedEvents, { notify: false })
+
     const event = createEvent('system', {
       text: `${state.profile.nickname} entered ${state.room.title}`
     })
@@ -98,14 +105,13 @@ function createTifoRoomState(options = {}) {
       room: state.room,
       peerCount: 0,
       syncStatus: 'Local worker preview',
-      events: state.events
+      events: sortedEvents()
     })
     send('peer:count', { count: 0 })
     send('sync:status', { status: 'Local worker preview' })
-    onJoinRoom(state.room)
   }
 
-  function handleRoomLeave() {
+  async function handleRoomLeave() {
     const previousRoom = state.room
     state.room = null
     state.events = []
@@ -115,7 +121,7 @@ function createTifoRoomState(options = {}) {
       events: []
     })
     send('peer:count', { count: 0 })
-    onLeaveRoom(previousRoom)
+    await onLeaveRoom(previousRoom)
   }
 
   function handleChatSend(command) {
@@ -156,16 +162,16 @@ function createTifoRoomState(options = {}) {
     })
   }
 
-  function handleCommand(command) {
+  async function handleCommand(command) {
     switch (command.type) {
       case 'profile:set':
         handleProfileSet(command)
         break
       case 'room:join':
-        handleRoomJoin(command)
+        await handleRoomJoin(command)
         break
       case 'room:leave':
-        handleRoomLeave(command)
+        await handleRoomLeave(command)
         break
       case 'chat:send':
         handleChatSend(command)
@@ -230,18 +236,76 @@ function createTifoRoomState(options = {}) {
       timestamp,
       room: state.room.code,
       payload,
-      status: 'remote'
+      status: event.status === 'stored' ? 'stored' : 'remote',
+      localCreatedAt: Number.isFinite(event.localCreatedAt) ? event.localCreatedAt : now(),
+      version: Number.isFinite(event.version) ? event.version : 1
     }
 
     state.seenEventIds.add(cleanEvent.id)
     state.events.unshift(cleanEvent)
     send('event:added', { event: cleanEvent })
+    onRemoteEvent(cleanEvent)
     return cleanEvent
+  }
+
+  function mergeStoredEvents(events, opts = {}) {
+    if (!Array.isArray(events)) return []
+
+    const added = []
+    for (const event of events) {
+      const cleanEvent = cleanStoredEvent(event)
+      if (!cleanEvent || state.seenEventIds.has(cleanEvent.id)) continue
+      state.seenEventIds.add(cleanEvent.id)
+      state.events.unshift(cleanEvent)
+      added.push(cleanEvent)
+    }
+
+    if (added.length > 0 && opts.notify !== false) {
+      state.events = sortedEvents()
+      send('event:list', { events: state.events })
+    } else if (added.length > 0) {
+      state.events = sortedEvents()
+    }
+
+    return added
+  }
+
+  function cleanStoredEvent(event) {
+    if (!state.room || !event || typeof event !== 'object') return null
+    if (typeof event.id !== 'string' || event.id.trim() === '') return null
+    if (event.room !== state.room.code) return null
+
+    const payload = sanitizeRemotePayload(event)
+    if (!payload) return null
+
+    return {
+      id: event.id.slice(0, 96),
+      type: event.type,
+      sender:
+        typeof event.sender === 'string' && event.sender.trim()
+          ? event.sender.trim().slice(0, 24)
+          : 'Stored fan',
+      timestamp: Number.isFinite(event.timestamp) ? event.timestamp : now(),
+      room: state.room.code,
+      payload,
+      status: event.status || 'stored',
+      localCreatedAt: Number.isFinite(event.localCreatedAt) ? event.localCreatedAt : now(),
+      version: Number.isFinite(event.version) ? event.version : 1
+    }
+  }
+
+  function sortedEvents() {
+    return [...state.events].sort((left, right) => {
+      const timeDelta = right.timestamp - left.timestamp
+      if (timeDelta !== 0) return timeDelta
+      return right.localCreatedAt - left.localCreatedAt
+    })
   }
 
   return {
     addRemoteEvent,
     handleCommand,
+    mergeStoredEvents,
     state
   }
 }

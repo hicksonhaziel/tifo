@@ -398,7 +398,7 @@ input:focus {
 
 .room-view {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 16px;
   padding: 20px;
 }
@@ -415,6 +415,45 @@ input:focus {
   padding: 16px;
 }
 
+.room-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.live-badge {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0 12px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.live-badge span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.live-badge.connected {
+  border-color: rgba(47, 197, 125, 0.4);
+  color: #a9f3cd;
+}
+
+.live-badge.connected span {
+  background: #2fc57d;
+  box-shadow: 0 0 0 5px rgba(47, 197, 125, 0.12);
+}
+
 .brand-mini h1 {
   overflow: hidden;
   font-size: clamp(24px, 3vw, 40px);
@@ -423,8 +462,82 @@ input:focus {
   white-space: nowrap;
 }
 
+.room-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.56fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line);
+}
+
+.scoreboard,
+.stage-summary {
+  min-width: 0;
+  background:
+    linear-gradient(135deg, rgba(229, 57, 53, 0.1), transparent 42%), rgba(10, 10, 10, 0.86);
+  padding: 18px;
+}
+
+.scoreboard {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+
+.score-team {
+  font-size: clamp(30px, 5vw, 52px);
+  font-weight: 950;
+  line-height: 0.9;
+}
+
+.score-team.muted {
+  color: var(--white-soft);
+}
+
+.score-divider {
+  color: var(--red);
+  font-size: 14px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.score-round {
+  justify-self: end;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.stage-summary {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+}
+
+.stage-summary span {
+  overflow: hidden;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stage-summary strong {
+  overflow: hidden;
+  font-size: 17px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .match-strip {
-  grid-template-columns: minmax(0, 1fr) 0.55fr 0.8fr minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 0.55fr minmax(0, 1fr) 0.55fr;
 }
 
 .room-grid {
@@ -479,10 +592,22 @@ input:focus {
 }
 
 .chat-message {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   padding: 12px;
+}
+
+.chat-message.remote,
+.timeline-event.remote {
+  border-color: rgba(47, 197, 125, 0.34);
+}
+
+.chat-message.stored,
+.timeline-event.stored {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.055);
 }
 
 .chat-message div {
@@ -496,6 +621,35 @@ input:focus {
 .chat-message p {
   margin-top: 7px;
   line-height: 1.45;
+}
+
+.message-status,
+.event-status {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 5px 7px;
+  text-transform: uppercase;
+}
+
+.message-status {
+  margin-top: 10px;
+}
+
+.message-status.remote,
+.event-status.remote {
+  border-color: rgba(47, 197, 125, 0.34);
+  color: #a9f3cd;
+}
+
+.message-status.stored,
+.event-status.stored {
+  color: var(--white-soft);
 }
 
 .chat-form {
@@ -607,9 +761,15 @@ input:focus {
 }
 
 .event-sender {
-  display: block;
-  margin-top: 8px;
   font-size: 12px;
+}
+
+.event-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .empty-state {
@@ -670,7 +830,8 @@ input:focus {
   }
 
   .status-grid,
-  .match-strip {
+  .match-strip,
+  .room-stage {
     grid-template-columns: 1fr;
   }
 
@@ -679,8 +840,17 @@ input:focus {
     flex-direction: column;
   }
 
+  .room-actions {
+    justify-content: space-between;
+  }
+
   .chat-form,
-  .reaction-grid {
+  .reaction-grid,
+  .scoreboard {
     grid-template-columns: 1fr;
+  }
+
+  .score-round {
+    justify-self: start;
   }
 }

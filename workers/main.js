@@ -6,6 +6,7 @@ const goodbye = require('graceful-goodbye')
 const FramedStream = require('framed-stream')
 const path = require('bare-path')
 const b4a = require('b4a')
+const { TifoEventLog } = require('./tifo-event-log')
 const { createTifoRoomState } = require('./tifo-room-state')
 
 const pipe = new FramedStream(Bare.IPC)
@@ -45,12 +46,14 @@ function send(type, payload = {}) {
 const roomPeers = new Map()
 const roomProtocol = 'tifo-room-v1'
 let roomTopic = null
+const eventLog = new TifoEventLog(store)
 
 const roomState = createTifoRoomState({
   send,
-  onJoinRoom: joinRoomNetwork,
-  onLeaveRoom: leaveRoomNetwork,
-  onLocalEvent: broadcastRoomEvent
+  onJoinRoom: handleJoinRoom,
+  onLeaveRoom: handleLeaveRoom,
+  onLocalEvent: handleLocalEvent,
+  onRemoteEvent: handleRemoteEvent
 })
 
 function topicForRoom(roomCode) {
@@ -115,6 +118,35 @@ function broadcastRoomEvent(event) {
     room: roomState.state.room.code,
     event
   })
+}
+
+function persistEvent(event) {
+  eventLog.append(event).catch((err) => {
+    send('error', {
+      command: 'event:persist',
+      message: err.message || 'Could not save event locally'
+    })
+  })
+}
+
+async function handleJoinRoom(room) {
+  const storedEvents = await eventLog.openRoom(room.code)
+  joinRoomNetwork(room)
+  return storedEvents
+}
+
+async function handleLeaveRoom() {
+  leaveRoomNetwork()
+  await eventLog.closeRoom()
+}
+
+function handleLocalEvent(event) {
+  persistEvent(event)
+  broadcastRoomEvent(event)
+}
+
+function handleRemoteEvent(event) {
+  persistEvent(event)
 }
 
 function handlePeerMessage(peer, data) {
@@ -232,6 +264,7 @@ roomSwarm.on('connection', handleRoomConnection)
 roomSwarm.on('update', updateRoomPeerStatus)
 
 goodbye(async () => {
+  await eventLog.closeRoom()
   await roomSwarm.destroy()
   await swarm.destroy()
   await pear.close()
@@ -270,7 +303,14 @@ pipe.on('data', async (data) => {
     return
   }
 
-  roomState.handleCommand(command)
+  try {
+    await roomState.handleCommand(command)
+  } catch (err) {
+    send('error', {
+      command: command.type,
+      message: err.message || 'Worker command failed'
+    })
+  }
 })
 
 send('app:ready', {

@@ -44,6 +44,58 @@ function formatTime(timestamp) {
   }).format(timestamp)
 }
 
+function roomParts(roomCode) {
+  const parts = roomCode.split('-').filter(Boolean)
+  return {
+    home: parts[0] || 'TIF',
+    away: parts[1] || 'OPP',
+    round: parts.at(-1) || 'Live'
+  }
+}
+
+function eventMeta(event) {
+  if (event.type === 'chat') {
+    return {
+      label: 'Chat',
+      text: event.payload.text
+    }
+  }
+
+  if (event.type === 'reaction') {
+    return {
+      label: 'Reaction',
+      text: event.payload.label
+    }
+  }
+
+  return {
+    label: 'System',
+    text: event.payload.text
+  }
+}
+
+function eventStatus(event) {
+  return ['local', 'remote', 'stored'].includes(event.status) ? event.status : 'local'
+}
+
+function eventStatusLabel(event) {
+  const status = eventStatus(event)
+  if (status === 'remote') return 'Peer'
+  if (status === 'stored') return 'Saved'
+  return 'Local'
+}
+
+function roomMetrics() {
+  const playableEvents = state.events.filter((event) => event.type !== 'system')
+  return {
+    chats: state.events.filter((event) => event.type === 'chat').length,
+    reactions: state.events.filter((event) => event.type === 'reaction').length,
+    saved: state.events.filter((event) => event.status === 'stored').length,
+    peerEvents: state.events.filter((event) => event.status === 'remote').length,
+    playableEvents
+  }
+}
+
 function sendWorkerCommand(type, payload = {}) {
   return bridge.writeWorkerIPC(workers.main, JSON.stringify({ ...payload, type }))
 }
@@ -207,28 +259,28 @@ function renderHome() {
 }
 
 function renderRoom() {
-  const hasEvents = state.events.some((event) => event.type !== 'system')
+  const metrics = roomMetrics()
+  const hasEvents = metrics.playableEvents.length > 0
+  const match = roomParts(state.roomCode)
+  const latestEvent = metrics.playableEvents[0]
   const timeline = state.events
     .map((event) => {
-      const meta =
-        event.type === 'chat' ? 'Chat' : event.type === 'reaction' ? 'Reaction' : 'System'
-      const text =
-        event.type === 'chat'
-          ? event.payload.text
-          : event.type === 'reaction'
-            ? event.payload.label
-            : event.payload.text
+      const meta = eventMeta(event)
+      const status = eventStatus(event)
 
       return `
-        <li class="timeline-event ${event.type}">
+        <li class="timeline-event ${event.type} ${status}">
           <div class="event-icon" aria-hidden="true"></div>
           <div>
             <div class="event-meta">
-              <span>${escapeHtml(meta)}</span>
+              <span>${escapeHtml(meta.label)}</span>
               <span>${escapeHtml(formatTime(event.timestamp))}</span>
             </div>
-            <p>${escapeHtml(text)}</p>
-            <span class="event-sender">${escapeHtml(event.sender)}</span>
+            <p>${escapeHtml(meta.text)}</p>
+            <div class="event-footer">
+              <span class="event-sender">${escapeHtml(event.sender)}</span>
+              <span class="event-status ${status}">${escapeHtml(eventStatusLabel(event))}</span>
+            </div>
           </div>
         </li>
       `
@@ -245,14 +297,31 @@ function renderRoom() {
             alt=""
           />
           <div>
-            <p class="eyebrow">${escapeHtml(state.syncStatus)}</p>
+            <p class="eyebrow">TIFO Match Room</p>
             <h1>${escapeHtml(state.roomTitle)}</h1>
           </div>
         </div>
         <div class="room-actions">
+          <span class="live-badge ${state.peerCount > 0 ? 'connected' : ''}">
+            <span aria-hidden="true"></span>
+            ${escapeHtml(state.peerCount > 0 ? 'P2P live' : 'Seeking peers')}
+          </span>
           <button class="ghost-action" id="leave-room" type="button">Leave</button>
         </div>
       </header>
+
+      <section class="room-stage" aria-label="Match summary">
+        <div class="scoreboard">
+          <span class="score-team">${escapeHtml(match.home)}</span>
+          <span class="score-divider">vs</span>
+          <span class="score-team muted">${escapeHtml(match.away)}</span>
+          <span class="score-round">${escapeHtml(match.round)}</span>
+        </div>
+        <div class="stage-summary">
+          <span>${escapeHtml(state.syncStatus)}</span>
+          <strong>${latestEvent ? escapeHtml(eventMeta(latestEvent).text) : 'Terrace is forming'}</strong>
+        </div>
+      </section>
 
       <section class="match-strip" aria-label="Room status">
         <div>
@@ -268,8 +337,8 @@ function renderRoom() {
           <strong>${escapeHtml(state.syncStatus)}</strong>
         </div>
         <div>
-          <span class="status-label">Topic</span>
-          <strong>${escapeHtml(state.roomCode)}</strong>
+          <span class="status-label">Saved</span>
+          <strong>${metrics.saved}</strong>
         </div>
       </section>
       ${
@@ -283,7 +352,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="chat-title">Terrace chat</h2>
-              <p>Messages round-trip through the worker.</p>
+              <p>${metrics.chats} messages</p>
             </div>
             <span class="local-pill">P2P room</span>
           </div>
@@ -305,7 +374,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="controls-title">Match controls</h2>
-              <p>Build the moment.</p>
+              <p>${metrics.reactions} reactions</p>
             </div>
           </div>
           <div class="reaction-grid">
@@ -333,7 +402,7 @@ function renderRoom() {
             Replay Echo
           </button>
           <p class="control-note">
-            ${hasEvents ? 'Local preview events are ready.' : 'Add a chat or reaction first.'}
+            ${hasEvents ? `${metrics.playableEvents.length} Echo-ready events` : 'Waiting for terrace noise'}
           </p>
         </aside>
 
@@ -341,7 +410,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="timeline-title">Echo timeline</h2>
-              <p>In-memory shared event stream.</p>
+              <p>${metrics.peerEvents} peer events</p>
             </div>
             <span>${state.events.length} events</span>
           </div>
@@ -393,17 +462,19 @@ function renderChatItems() {
   }
 
   return chatEvents
-    .map(
-      (event) => `
-        <article class="chat-message">
+    .map((event) => {
+      const status = eventStatus(event)
+      return `
+        <article class="chat-message ${status}">
           <div>
             <strong>${escapeHtml(event.sender)}</strong>
             <span>${escapeHtml(formatTime(event.timestamp))}</span>
           </div>
           <p>${escapeHtml(event.payload.text)}</p>
+          <span class="message-status ${status}">${escapeHtml(eventStatusLabel(event))}</span>
         </article>
       `
-    )
+    })
     .join('')
 }
 
