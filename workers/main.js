@@ -50,10 +50,15 @@ function send(type, payload = {}) {
 const roomPeers = new Map()
 const roomControlProtocol = 'tifo-room-control-v1'
 const chantMaxBytes = 2 * 1024 * 1024
+const clipMaxBytes = 64 * 1024 * 1024
+const clipMaxDurationMs = 5 * 60 * 1000
+const clipChunkBytes = 48 * 1024
 let roomTopic = null
 let echoRefreshInterval = null
 const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
+const clipDir = path.join(updaterConfig.dir, 'tifo-clips')
 const pendingChantRequests = new Map()
+const pendingClipRequests = new Map()
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 const pendingSyncEventIds = new Set()
@@ -66,6 +71,7 @@ const roomState = createTifoRoomState({
   onJoinRoom: handleJoinRoom,
   onLeaveRoom: handleLeaveRoom,
   onChantSave: handleChantSave,
+  onClipSave: handleClipSave,
   onLocalEvent: handleLocalEvent,
   onRemoteEvent: handleRemoteEvent
 })
@@ -107,12 +113,31 @@ function chantExtension(mimeType) {
   return 'webm'
 }
 
+function clipExtension(mimeType) {
+  if (/webm/i.test(mimeType)) return 'webm'
+  if (/ogg|ogv/i.test(mimeType)) return 'ogv'
+  if (/quicktime|mov/i.test(mimeType)) return 'mov'
+  return 'mp4'
+}
+
 function chantRoomDir(roomCode) {
   return path.join(chantDir, safeFilePart(roomCode.trim().toUpperCase()))
 }
 
+function clipRoomDir(roomCode) {
+  return path.join(clipDir, safeFilePart(roomCode.trim().toUpperCase()))
+}
+
 function chantFilePath(roomCode, fileId) {
   return path.join(chantRoomDir(roomCode), safeFilePart(fileId))
+}
+
+function clipFileName(clipRef, mimeType) {
+  return `${safeFilePart(clipRef)}.${clipExtension(mimeType)}`
+}
+
+function clipFilePath(roomCode, clipRef, mimeType) {
+  return path.join(clipRoomDir(roomCode), clipFileName(clipRef, mimeType))
 }
 
 function chantRequestId() {
@@ -220,6 +245,15 @@ function broadcastChantRequest(request) {
   }
 }
 
+function broadcastClipRequest(request) {
+  for (const peer of roomPeers.values()) {
+    sendPeer(peer, {
+      type: 'clip:request',
+      ...request
+    })
+  }
+}
+
 function clearPendingChantRequests(message = 'Chant transfer was cancelled') {
   for (const [requestId, pending] of pendingChantRequests) {
     clearTimeout(pending.timeout)
@@ -230,6 +264,19 @@ function clearPendingChantRequests(message = 'Chant transfer was cancelled') {
       })
     }
     pendingChantRequests.delete(requestId)
+  }
+}
+
+function clearPendingClipRequests(message = 'Clip transfer was cancelled') {
+  for (const [requestId, pending] of pendingClipRequests) {
+    clearTimeout(pending.timeout)
+    if (!pending.silent) {
+      send('error', {
+        command: 'clip:load',
+        message
+      })
+    }
+    pendingClipRequests.delete(requestId)
   }
 }
 
@@ -483,6 +530,74 @@ async function handleChantSave(command) {
   }
 }
 
+async function handleClipSave(command) {
+  if (!command.localPath) {
+    send('error', {
+      command: 'clip:save',
+      message: 'Could not read the selected clip path'
+    })
+    return null
+  }
+
+  if (command.durationMs > clipMaxDurationMs) {
+    send('error', {
+      command: 'clip:save',
+      message: 'Clip must be 5 minutes or shorter'
+    })
+    return null
+  }
+
+  if (command.size > clipMaxBytes) {
+    send('error', {
+      command: 'clip:save',
+      message: 'Clip must be 64 MB or smaller'
+    })
+    return null
+  }
+
+  let data = null
+  try {
+    data = await fs.readFile(command.localPath)
+  } catch (err) {
+    send('error', {
+      command: 'clip:save',
+      message: err.message || 'Could not read the selected clip'
+    })
+    return null
+  }
+
+  if (data.byteLength < 1) {
+    send('error', {
+      command: 'clip:save',
+      message: 'Selected clip is empty'
+    })
+    return null
+  }
+
+  if (data.byteLength > clipMaxBytes) {
+    send('error', {
+      command: 'clip:save',
+      message: 'Clip must be 64 MB or smaller'
+    })
+    return null
+  }
+
+  const dir = clipRoomDir(command.roomCode)
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(clipFilePath(command.roomCode, command.clipRef, command.mimeType), data)
+
+  return {
+    caption: command.caption,
+    clientId: command.clientId,
+    clipRef: command.clipRef,
+    durationMs: command.durationMs,
+    lastModified: command.lastModified,
+    mimeType: command.mimeType,
+    size: data.byteLength,
+    title: command.title
+  }
+}
+
 async function loadLocalChant(roomCode, fileId) {
   const safeFileId = safeFilePart(fileId)
   const data = await fs.readFile(chantFilePath(roomCode, safeFileId))
@@ -490,11 +605,28 @@ async function loadLocalChant(roomCode, fileId) {
   return { data, fileId: safeFileId }
 }
 
+async function loadLocalClip(roomCode, clipRef, mimeType) {
+  const filePath = clipFilePath(roomCode, clipRef, mimeType)
+  const data = await fs.readFile(filePath)
+  if (data.byteLength > clipMaxBytes) throw new Error('Clip video is too large')
+  return { data, filePath }
+}
+
 function sendLoadedChant({ data, eventId, fileId, mimeType }) {
   send('chant:loaded', {
     eventId: eventId.slice(0, 96),
     dataUrl: `data:${mimeType};base64,${b4a.toString(data, 'base64')}`,
     fileId
+  })
+}
+
+function sendLoadedClip({ clipRef, eventId, filePath, mimeType, size }) {
+  send('clip:loaded', {
+    clipRef: clipRef.slice(0, 96),
+    eventId: eventId.slice(0, 96),
+    filePath,
+    mimeType,
+    size
   })
 }
 
@@ -542,6 +674,67 @@ function requestRemoteChant({ eventId, fileId, mimeType, silent = false }) {
   }
 }
 
+function requestRemoteClip({ eventId, clipRef, mimeType, size, silent = false }) {
+  if (roomPeers.size === 0) {
+    if (!silent) {
+      send('error', {
+        command: 'clip:load',
+        message: 'This clip is not available on this device and no peers are connected'
+      })
+    }
+    return
+  }
+
+  if (size > clipMaxBytes) {
+    if (!silent) {
+      send('error', {
+        command: 'clip:load',
+        message: 'Clip is larger than the 64 MB transfer limit'
+      })
+    }
+    return
+  }
+
+  const requestId = chantRequestId()
+  const timeout = setTimeout(() => {
+    pendingClipRequests.delete(requestId)
+    if (!silent) {
+      send('error', {
+        command: 'clip:load',
+        message: 'Connected peers do not have this clip yet'
+      })
+    }
+  }, 45000)
+
+  pendingClipRequests.set(requestId, {
+    chunks: [],
+    clipRef,
+    eventId,
+    mimeType,
+    receivedBytes: 0,
+    receivedChunks: 0,
+    silent,
+    size,
+    timeout,
+    totalBytes: 0,
+    totalChunks: 0
+  })
+
+  broadcastClipRequest({
+    clipRef,
+    eventId,
+    mimeType,
+    requestId,
+    size
+  })
+
+  if (!silent) {
+    send('sync:status', {
+      status: 'Requesting clip from peers'
+    })
+  }
+}
+
 async function handleChantLoad(command) {
   const room = roomState.state.room
   if (!room) {
@@ -583,6 +776,51 @@ async function handleChantLoad(command) {
           ? command.mimeType.trim().slice(0, 80)
           : 'audio/webm',
       silent: command.silent === true
+    })
+  }
+}
+
+async function handleClipLoad(command) {
+  const room = roomState.state.room
+  if (!room) {
+    send('error', {
+      command: 'clip:load',
+      message: 'Join a room before loading a clip'
+    })
+    return
+  }
+
+  if (typeof command.eventId !== 'string' || typeof command.clipRef !== 'string') {
+    send('error', {
+      command: 'clip:load',
+      message: 'Clip event id and reference are required'
+    })
+    return
+  }
+
+  const clipRef = safeFilePart(command.clipRef)
+  const mimeType =
+    typeof command.mimeType === 'string' && command.mimeType.trim()
+      ? command.mimeType.trim().slice(0, 80)
+      : 'video/mp4'
+  const size = Number(command.size)
+
+  try {
+    const { data, filePath } = await loadLocalClip(room.code, clipRef, mimeType)
+    sendLoadedClip({
+      clipRef,
+      eventId: command.eventId,
+      filePath,
+      mimeType,
+      size: data.byteLength
+    })
+  } catch {
+    requestRemoteClip({
+      clipRef,
+      eventId: command.eventId.slice(0, 96),
+      mimeType,
+      silent: command.silent === true,
+      size: Number.isFinite(size) ? Math.round(size) : clipMaxBytes + 1
     })
   }
 }
@@ -661,6 +899,138 @@ async function handlePeerChantData(message) {
   })
 }
 
+async function handlePeerClipRequest(peer, message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string' || message.requestId.trim() === '') return
+  if (typeof message.eventId !== 'string' || message.eventId.trim() === '') return
+  if (typeof message.clipRef !== 'string' || message.clipRef.trim() === '') return
+
+  const clipRef = safeFilePart(message.clipRef)
+  const mimeType =
+    typeof message.mimeType === 'string' && message.mimeType.trim()
+      ? message.mimeType.trim().slice(0, 80)
+      : 'video/mp4'
+
+  try {
+    const { data } = await loadLocalClip(room.code, clipRef, mimeType)
+    const totalChunks = Math.ceil(data.byteLength / clipChunkBytes)
+    const requestId = message.requestId.slice(0, 96)
+
+    sendPeer(peer, {
+      type: 'clip:data:start',
+      clipRef,
+      eventId: message.eventId.slice(0, 96),
+      mimeType,
+      requestId,
+      totalBytes: data.byteLength,
+      totalChunks
+    })
+
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * clipChunkBytes
+      const chunk = data.subarray(start, Math.min(start + clipChunkBytes, data.byteLength))
+      sendPeer(peer, {
+        type: 'clip:data:chunk',
+        bytesBase64: b4a.toString(chunk, 'base64'),
+        index,
+        requestId
+      })
+      if (index % 16 === 0) await Promise.resolve()
+    }
+
+    sendPeer(peer, {
+      type: 'clip:data:end',
+      requestId
+    })
+  } catch {
+    // This peer may only have metadata. Another connected peer can still answer.
+  }
+}
+
+function handlePeerClipDataStart(message) {
+  if (typeof message.requestId !== 'string') return
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingClipRequests.get(requestId)
+  if (!pending) return
+  if (safeFilePart(message.clipRef) !== pending.clipRef) return
+
+  const totalBytes = Number(message.totalBytes)
+  const totalChunks = Number(message.totalChunks)
+  if (!Number.isFinite(totalBytes) || totalBytes < 1 || totalBytes > clipMaxBytes) return
+  if (!Number.isInteger(totalChunks) || totalChunks < 1) return
+  if (totalChunks > Math.ceil(totalBytes / clipChunkBytes) + 1) return
+
+  pending.chunks = new Array(totalChunks)
+  pending.receivedBytes = 0
+  pending.receivedChunks = 0
+  pending.totalBytes = Math.round(totalBytes)
+  pending.totalChunks = totalChunks
+}
+
+function handlePeerClipDataChunk(message) {
+  if (typeof message.requestId !== 'string') return
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingClipRequests.get(requestId)
+  if (!pending || pending.totalChunks < 1) return
+  if (typeof message.bytesBase64 !== 'string') return
+  if (message.bytesBase64.length > Math.ceil(clipChunkBytes * 1.4)) return
+
+  const index = Number(message.index)
+  if (!Number.isInteger(index) || index < 0 || index >= pending.totalChunks) return
+  if (pending.chunks[index]) return
+
+  const chunk = b4a.from(message.bytesBase64, 'base64')
+  if (chunk.byteLength < 1 || chunk.byteLength > clipChunkBytes) return
+  if (pending.receivedBytes + chunk.byteLength > clipMaxBytes) return
+
+  pending.chunks[index] = chunk
+  pending.receivedBytes += chunk.byteLength
+  pending.receivedChunks += 1
+}
+
+async function handlePeerClipDataEnd(message) {
+  const room = roomState.state.room
+  if (!room) return
+  if (typeof message.requestId !== 'string') return
+
+  const requestId = message.requestId.slice(0, 96)
+  const pending = pendingClipRequests.get(requestId)
+  if (!pending) return
+  if (pending.receivedChunks !== pending.totalChunks) return
+  if (pending.receivedBytes !== pending.totalBytes) return
+
+  clearTimeout(pending.timeout)
+  pendingClipRequests.delete(requestId)
+
+  const data = b4a.concat(pending.chunks)
+  if (data.byteLength !== pending.totalBytes || data.byteLength > clipMaxBytes) return
+
+  const filePath = clipFilePath(room.code, pending.clipRef, pending.mimeType)
+  try {
+    await fs.mkdir(clipRoomDir(room.code), { recursive: true })
+    await fs.writeFile(filePath, data)
+  } catch (err) {
+    send('error', {
+      command: 'clip:cache',
+      message: err.message || 'Could not cache clip locally'
+    })
+    return
+  }
+
+  sendLoadedClip({
+    clipRef: pending.clipRef,
+    eventId: pending.eventId,
+    filePath,
+    mimeType: pending.mimeType,
+    size: data.byteLength
+  })
+
+  send('sync:status', {
+    status: `P2P connected: ${roomPeers.size} peer${roomPeers.size === 1 ? '' : 's'}`
+  })
+}
+
 async function handlePeerMessage(peer, message) {
   const room = roomState.state.room
   if (simulatedOffline) return
@@ -705,6 +1075,26 @@ async function handlePeerMessage(peer, message) {
 
   if (message.type === 'chant:data') {
     await handlePeerChantData(message)
+    return
+  }
+
+  if (message.type === 'clip:request') {
+    await handlePeerClipRequest(peer, message)
+    return
+  }
+
+  if (message.type === 'clip:data:start') {
+    handlePeerClipDataStart(message)
+    return
+  }
+
+  if (message.type === 'clip:data:chunk') {
+    handlePeerClipDataChunk(message)
+    return
+  }
+
+  if (message.type === 'clip:data:end') {
+    await handlePeerClipDataEnd(message)
   }
 }
 
@@ -847,6 +1237,7 @@ function joinRoomNetwork(room) {
 function leaveRoomNetwork() {
   stopEchoRefresh()
   clearPendingChantRequests()
+  clearPendingClipRequests()
 
   if (roomTopic) {
     roomSwarm.leave(roomTopic).catch((err) => {
@@ -912,6 +1303,11 @@ pipe.on('data', async (data) => {
 
     if (command.type === 'chant:load') {
       await handleChantLoad(command)
+      return
+    }
+
+    if (command.type === 'clip:load') {
+      await handleClipLoad(command)
       return
     }
 

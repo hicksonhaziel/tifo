@@ -66,13 +66,17 @@ const reactionTypes = [
 const app = document.getElementById('app')
 const chantAudioUrls = new Map()
 const chantPrefetchIds = new Set()
+const clipPrefetchIds = new Set()
 const clipPreviewUrls = new Map()
 const pendingChantLoads = new Map()
 const pendingChantUrls = new Map()
+const pendingClipLoads = new Map()
 const pendingClipPreviews = new Map()
 const CHANT_MIN_MS = 3000
 const CHANT_MAX_MS = 10000
 const FALLBACK_CHANT_MS = 3600
+const CLIP_MAX_BYTES = 64 * 1024 * 1024
+const CLIP_MAX_DURATION_MS = 5 * 60 * 1000
 const CLIP_PATH_STORAGE_KEY = 'tifo:clip-paths'
 const REPLAY_WINDOW_BEFORE_MS = 5000
 const REPLAY_WINDOW_AFTER_MS = 25000
@@ -116,6 +120,13 @@ function formatTime(timestamp) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
+  }).format(timestamp)
+}
+
+function formatDate(timestamp) {
+  return new Intl.DateTimeFormat('en', {
+    day: 'numeric',
+    month: 'short'
   }).format(timestamp)
 }
 
@@ -167,7 +178,7 @@ function eventMeta(event) {
   if (event.type === 'clip') {
     return {
       label: 'Clip',
-      text: event.payload.caption || event.payload.filename
+      text: event.payload.caption || event.payload.title || 'Highlight clip'
     }
   }
 
@@ -213,6 +224,7 @@ function upsertEvent(event) {
   attachPendingChantUrl(event)
   attachPendingClipPreview(event)
   prefetchChantAudio(event)
+  prefetchClipVideo(event)
   const existingIndex = state.events.findIndex((item) => item.id === event.id)
   if (existingIndex >= 0) state.events.splice(existingIndex, 1)
   state.events.unshift(event)
@@ -237,6 +249,19 @@ function prefetchChantAudio(event) {
 
 function prefetchChantAudios(events) {
   for (const event of events) prefetchChantAudio(event)
+}
+
+function prefetchClipVideo(event) {
+  if (event?.type !== 'clip' || !event.payload?.clipRef) return
+  if (clipPreviewUrlForEvent(event) || pendingClipLoads.has(event.id)) return
+  if (clipPrefetchIds.has(event.id)) return
+
+  clipPrefetchIds.add(event.id)
+  loadClipVideo(event, { silent: true })
+}
+
+function prefetchClipVideos(events) {
+  for (const event of events) prefetchClipVideo(event)
 }
 
 function rememberEffectEvents(events) {
@@ -344,6 +369,15 @@ function resolvePendingChantLoad(eventId, dataUrl = '') {
   pending.resolve(dataUrl)
 }
 
+function resolvePendingClipLoad(eventId, videoUrl = '') {
+  const pending = pendingClipLoads.get(eventId)
+  if (!pending) return
+
+  clearTimeout(pending.timeout)
+  pendingClipLoads.delete(eventId)
+  pending.resolve(videoUrl)
+}
+
 function applyWorkerMessage(message) {
   let shouldRender = true
 
@@ -379,8 +413,10 @@ function applyWorkerMessage(message) {
       state.effects = []
       state.seenEffectEventIds.clear()
       chantPrefetchIds.clear()
+      clipPrefetchIds.clear()
       rememberEffectEvents(state.events)
       prefetchChantAudios(state.events)
+      prefetchClipVideos(state.events)
       state.lastError = ''
       break
     case 'room:left':
@@ -407,6 +443,7 @@ function applyWorkerMessage(message) {
         status: 'idle'
       }
       chantPrefetchIds.clear()
+      clipPrefetchIds.clear()
       state.effects = []
       state.seenEffectEventIds.clear()
       state.lastError = ''
@@ -414,7 +451,10 @@ function applyWorkerMessage(message) {
     case 'peer:count':
       shouldRender = state.peerCount !== message.count
       state.peerCount = message.count
-      if (message.count > 0) prefetchChantAudios(state.events)
+      if (message.count > 0) {
+        prefetchChantAudios(state.events)
+        prefetchClipVideos(state.events)
+      }
       break
     case 'sync:status':
       shouldRender = state.syncStatus !== message.status
@@ -451,12 +491,23 @@ function applyWorkerMessage(message) {
           applyLiveEffects(events)
           state.events = events
           prefetchChantAudios(state.events)
+          prefetchClipVideos(state.events)
         }
       }
       break
     case 'chant:loaded':
       chantAudioUrls.set(message.eventId, message.dataUrl)
       resolvePendingChantLoad(message.eventId, message.dataUrl)
+      break
+    case 'clip:loaded':
+      {
+        const videoUrl = pathToFileUrl(message.filePath || '')
+        if (videoUrl) {
+          clipPreviewUrls.set(message.eventId, videoUrl)
+          storeLocalClipPath(message.clipRef, message.filePath)
+        }
+        resolvePendingClipLoad(message.eventId, videoUrl)
+      }
       break
     case 'echo:replay':
       shouldRender = false
@@ -580,9 +631,16 @@ function clipPreviewUrlForEvent(event) {
 }
 
 function clearClipPreviewUrls() {
-  for (const url of clipPreviewUrls.values()) URL.revokeObjectURL(url)
+  for (const url of clipPreviewUrls.values()) {
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
   for (const preview of pendingClipPreviews.values()) URL.revokeObjectURL(preview.url)
+  for (const pending of pendingClipLoads.values()) {
+    clearTimeout(pending.timeout)
+    pending.resolve('')
+  }
   clipPreviewUrls.clear()
+  pendingClipLoads.clear()
   pendingClipPreviews.clear()
 }
 
@@ -611,12 +669,20 @@ function clipFileSupported(file) {
   return /\.(mp4|m4v|mov|webm|ogg|ogv|mkv)$/i.test(file.name)
 }
 
+function clipMimeType(file) {
+  if (file.type && file.type.startsWith('video/')) return file.type
+  if (/\.webm$/i.test(file.name)) return 'video/webm'
+  if (/\.(ogg|ogv)$/i.test(file.name)) return 'video/ogg'
+  if (/\.(mov|m4v)$/i.test(file.name)) return 'video/quicktime'
+  return 'video/mp4'
+}
+
 function bytesToHex(buffer) {
   return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 async function clipRefForFile(file) {
-  const input = `${file.name}\n${file.size}\n${file.lastModified || 0}\n${file.type || ''}`
+  const input = `${file.size}\n${file.lastModified || 0}\n${clipMimeType(file)}`
   if (!window.crypto?.subtle) {
     return `${file.size.toString(16)}-${(file.lastModified || Date.now()).toString(16)}`
   }
@@ -685,6 +751,16 @@ async function saveClipMetadata(file) {
     return
   }
 
+  if (file.size > CLIP_MAX_BYTES) {
+    state.clipDraft = {
+      ...state.clipDraft,
+      error: 'Clip must be 64 MB or smaller',
+      status: 'error'
+    }
+    render()
+    return
+  }
+
   let objectUrl = ''
   try {
     objectUrl = URL.createObjectURL(file)
@@ -699,6 +775,29 @@ async function saveClipMetadata(file) {
       clipRefForFile(file),
       readVideoDuration(objectUrl)
     ])
+
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      URL.revokeObjectURL(objectUrl)
+      state.clipDraft = {
+        ...state.clipDraft,
+        error: 'Could not read clip duration',
+        status: 'error'
+      }
+      render()
+      return
+    }
+
+    if (durationMs > CLIP_MAX_DURATION_MS) {
+      URL.revokeObjectURL(objectUrl)
+      state.clipDraft = {
+        ...state.clipDraft,
+        error: 'Clip must be 5 minutes or shorter',
+        status: 'error'
+      }
+      render()
+      return
+    }
+
     const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
     const localPath = localPathForFile(file)
 
@@ -713,10 +812,11 @@ async function saveClipMetadata(file) {
       clientId,
       clipRef,
       durationMs,
-      filename: file.name,
       lastModified: file.lastModified || null,
-      mimeType: file.type || 'video/mp4',
-      size: file.size
+      localPath,
+      mimeType: clipMimeType(file),
+      size: file.size,
+      title: 'Highlight clip'
     })
 
     state.clipDraft = clipDraftIdle()
@@ -797,6 +897,34 @@ function loadChantAudio(event, options = {}) {
     timeout
   })
   requestChantLoad(event, options)
+  if (options.silent !== true && state.view === 'room') render()
+  return promise
+}
+
+function loadClipVideo(event, options = {}) {
+  const existingUrl = clipPreviewUrlForEvent(event)
+  if (existingUrl) return Promise.resolve(existingUrl)
+  if (!event.payload?.clipRef) return Promise.resolve('')
+  if (pendingClipLoads.has(event.id)) return pendingClipLoads.get(event.id).promise
+
+  let resolveLoad = null
+  const promise = new Promise((resolve) => {
+    resolveLoad = resolve
+  })
+  const timeoutMs = options.silent === true ? 45000 : 60000
+  const timeout = setTimeout(() => {
+    pendingClipLoads.delete(event.id)
+    if (options.silent === true && !clipPreviewUrlForEvent(event)) clipPrefetchIds.delete(event.id)
+    resolveLoad('')
+    if (state.view === 'room') render()
+  }, timeoutMs)
+
+  pendingClipLoads.set(event.id, {
+    promise,
+    resolve: resolveLoad,
+    timeout
+  })
+  requestClipLoad(event, options)
   if (options.silent !== true && state.view === 'room') render()
   return promise
 }
@@ -1236,6 +1364,17 @@ function requestChantLoad(event, options = {}) {
     fileId: event.payload.fileId,
     mimeType: event.payload.mimeType,
     silent: options.silent === true
+  })
+}
+
+function requestClipLoad(event, options = {}) {
+  if (clipPreviewUrlForEvent(event)) return
+  sendWorkerCommand('clip:load', {
+    clipRef: event.payload.clipRef,
+    eventId: event.id,
+    mimeType: event.payload.mimeType,
+    silent: options.silent === true,
+    size: event.payload.size
   })
 }
 
@@ -1826,28 +1965,34 @@ function renderClipPicker() {
       ${
         clip.error
           ? `<p class="clip-error" role="status">${escapeHtml(clip.error)}</p>`
-          : `<p class="control-note">Only metadata is shared. The video file stays local.</p>`
+          : `<p class="control-note">Peer transfer supports clips up to 5 minutes and 64 MB.</p>`
       }
     </div>
   `
 }
 
+function clipDetailText(event) {
+  const payload = event.payload
+  const date = formatDate(payload.lastModified || event.timestamp)
+  return `${formatClipDuration(payload.durationMs)} · ${date} · ${formatBytes(payload.size)}`
+}
+
 function renderClipEvent(event) {
   const payload = event.payload
   const previewUrl = clipPreviewUrlForEvent(event)
-  const caption = payload.caption || 'No caption'
-  const duration = formatClipDuration(payload.durationMs)
+  const isLoading = pendingClipLoads.has(event.id)
+  const caption = payload.caption || payload.title || 'Highlight clip'
 
   return `
     <div class="clip-card">
       <div>
         <strong>${escapeHtml(caption)}</strong>
-        <p>${escapeHtml(payload.filename)} · ${escapeHtml(duration)} · ${escapeHtml(formatBytes(payload.size))}</p>
+        <p>${escapeHtml(clipDetailText(event))}</p>
       </div>
       ${
         previewUrl
           ? `<video class="clip-preview" controls preload="metadata" src="${escapeHtml(previewUrl)}"></video>`
-          : `<div class="clip-unavailable">Clip unavailable on this device</div>`
+          : `<div class="clip-unavailable">${escapeHtml(isLoading ? 'Preparing clip from peer' : 'Clip unavailable on this device')}</div>`
       }
     </div>
   `

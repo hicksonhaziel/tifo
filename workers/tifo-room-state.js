@@ -7,6 +7,7 @@ function createTifoRoomState(options = {}) {
   const onLocalEvent = options.onLocalEvent || noop
   const onRemoteEvent = options.onRemoteEvent || noop
   const onChantSave = options.onChantSave || noop
+  const onClipSave = options.onClipSave || noop
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -176,7 +177,7 @@ function createTifoRoomState(options = {}) {
     addEvent('chant', payload)
   }
 
-  function handleClipSave(command) {
+  async function handleClipSave(command) {
     if (!requireRoom(command.type)) return
 
     const payload = sanitizeClipPayload(command)
@@ -185,7 +186,14 @@ function createTifoRoomState(options = {}) {
       return
     }
 
-    addEvent('clip', payload)
+    const savedPayload = await onClipSave({
+      ...payload,
+      localPath: typeof command.localPath === 'string' ? command.localPath.trim() : '',
+      roomCode: state.room.code
+    })
+
+    if (!savedPayload) return
+    addEvent('clip', savedPayload)
   }
 
   function handleEchoReplay(command) {
@@ -223,7 +231,7 @@ function createTifoRoomState(options = {}) {
         await handleChantSave(command)
         break
       case 'clip:save':
-        handleClipSave(command)
+        await handleClipSave(command)
         break
       case 'echo:replay':
         handleEchoReplay(command)
@@ -284,32 +292,36 @@ function createTifoRoomState(options = {}) {
 
   function sanitizeClipPayload(payload) {
     if (!payload || typeof payload !== 'object') return null
-    if (typeof payload.filename !== 'string' || payload.filename.trim() === '') return null
     if (typeof payload.clipRef !== 'string' || payload.clipRef.trim() === '') return null
 
     const size = Number(payload.size)
-    if (!Number.isFinite(size) || size < 1 || size > 50 * 1024 * 1024 * 1024) return null
+    if (!Number.isFinite(size) || size < 1 || size > 64 * 1024 * 1024) return null
 
     const durationMs = Number(payload.durationMs)
     const cleanDurationMs =
-      Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= 4 * 60 * 60 * 1000
+      Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= 5 * 60 * 1000
         ? Math.round(durationMs)
         : null
+    if (cleanDurationMs === null) return null
 
     const lastModified = Number(payload.lastModified)
+    const title =
+      typeof payload.title === 'string' && payload.title.trim()
+        ? payload.title.trim().slice(0, 80)
+        : 'Highlight clip'
 
     return {
       caption: typeof payload.caption === 'string' ? payload.caption.trim().slice(0, 140) : '',
       clientId: typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : null,
       clipRef: payload.clipRef.trim().slice(0, 96),
       durationMs: cleanDurationMs,
-      filename: payload.filename.trim().slice(0, 140),
       lastModified: Number.isFinite(lastModified) ? Math.round(lastModified) : null,
       mimeType:
         typeof payload.mimeType === 'string' && payload.mimeType.trim()
           ? payload.mimeType.trim().slice(0, 80)
           : 'video/mp4',
-      size: Math.round(size)
+      size: Math.round(size),
+      title
     }
   }
 
