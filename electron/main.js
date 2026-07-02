@@ -18,6 +18,8 @@ const appName = productName ?? name
 const appId = 'com.tifo.TIFO'
 const appIcon = path.join(__dirname, '..', 'build', 'icon', 'icon-256x256.png')
 
+app.commandLine.appendSwitch('class', appId)
+app.commandLine.appendSwitch('name', appId)
 app.setName(appName)
 app.setAppUserModelId(appId)
 
@@ -134,6 +136,7 @@ async function createWindow() {
       contextIsolation: true
     }
   })
+  win.setIcon(appIcon)
   win.setMenuBarVisibility(false)
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL

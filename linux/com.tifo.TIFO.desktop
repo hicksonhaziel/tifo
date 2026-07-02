@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=TIFO
+Comment=Peer-to-peer living terrace for football fans
+Exec=/home/hickson/tifo/node_modules/electron/dist/electron /home/hickson/tifo --no-updates
+Path=/home/hickson/tifo
+Icon=/home/hickson/tifo/build/icon.png
+Terminal=false
+Categories=Network;Chat;
+StartupNotify=true
+StartupWMClass=com.tifo.TIFO

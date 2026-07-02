@@ -6,6 +6,7 @@
   "description": "Peer-to-peer living terrace for football fans.",
   "license": "MIT",
   "author": "",
+  "desktopName": "com.tifo.TIFO.desktop",
   "type": "commonjs",
   "main": "electron/main.js",
   "private": true,
