@@ -1,0 +1,185 @@
+TIFO Codex Context
+Last updated: 2026-07-02
+
+Purpose
+TIFO is a Pear Electron desktop app for a peer-to-peer football "living terrace".
+The demo goal is not normal chat. The final demo should show several fans joining
+the same match room, creating chat/reaction/chant events, merging them into an
+Echo timeline, and replaying a goal moment later.
+
+Current Phase
+Phase 0 is complete.
+Phase 1 is complete.
+Phase 2 is complete.
+Next phase is Phase 3: First Real P2P Room.
+
+What Is Implemented Now
+- Repo is based on Holepunch's hello-pear-electron starter.
+- App is renamed/branded as TIFO.
+- Native app identity and Linux dock icon are set up.
+- TIFO logo/icon/banner assets live under assets/brand/.
+- Electron menu bar is removed.
+- Renderer UI has a Home / Join Room screen.
+- Renderer UI has a Match Room screen.
+- Local-only chat, reactions, and timeline placeholders work inside the renderer.
+- Renderer-to-worker JSON command protocol is implemented.
+- The worker starts and sends app:ready.
+- Fake local room join/leave now happens through workers/main.js.
+- Chat, reaction, and Echo replay preview events round-trip through the worker.
+- Unknown worker commands return structured error messages.
+- BUILD.md and PLAN.md are private local planning files and ignored by git.
+- package.json uses CommonJS and vanilla JS/CSS. No Tailwind and no TypeScript yet.
+
+What Is Not Implemented Yet
+- No Hyperswarm room messaging between app instances yet.
+- No Hypercore/Corestore persistence for TIFO events yet.
+- No Autobase merged Echo timeline yet.
+- No audio chant recording yet.
+- No replay Echo mode yet.
+- No offline/reconnect demo yet.
+- No production release/publishing flow yet.
+
+Current Architecture
+- renderer/ is the UI. It should only talk through window.bridge.
+- electron/main.js is the Electron main process. It launches Bare workers through
+  PearRuntime.run() and forwards worker IPC to the renderer.
+- workers/main.js is the Bare worker. This is where P2P, storage, Hyperswarm,
+  Corestore, Hypercore, and Autobase code should live.
+- The renderer should not know Hyperswarm details.
+- The worker should not know DOM details.
+- The main process should stay mostly a bridge, not become the app backend.
+
+Pear Docs Checked
+- Pear docs say the hello-pear-electron template is split into renderer/,
+  workers/main.js, electron/main.js, electron/preload.js, package.json, and build/.
+- Pear docs say the renderer calls window.bridge, not ipcRenderer directly.
+- Pear docs say worker IPC messages are raw bytes and it is valid to send JSON
+  strings over writeWorkerIPC/onWorkerIPC using a message type field.
+- Pear docs say P2P app logic belongs in the Bare worker, where Hyperswarm and
+  Corestore are available.
+- Pear docs describe a production chat shape with a separate Bare worker,
+  Autobase-backed shared room, Corestore persistence, and JSON over a framed pipe.
+- Reference URLs:
+  https://docs.pears.com/getting-started/from-a-template/start-from-hello-pear-electron/
+  https://docs.pears.com/getting-started/build-a-peer-to-peer-chat/reshape-into-a-production-app/
+  https://docs.pears.com/
+
+Important Files
+- package.json: app metadata, scripts, dependencies, pear upgrade link.
+- electron/main.js: Electron window, app identity, worker launch/proxy.
+- electron/preload.js: exposes safe window.bridge methods to renderer.
+- workers/main.js: Bare worker, PearRuntime updater, future P2P backend.
+- workers/tifo-room-state.js: testable local Phase 2 room command/event state.
+- renderer/app.js: current UI and worker-backed local preview flow.
+- renderer/styles.css: current Phase 1 styling.
+- assets/brand/: extracted TIFO brand assets.
+- build/icon*.png/ico/icns: app icon assets.
+- linux/com.tifo.TIFO.desktop: Linux desktop launcher identity.
+- BUILD.md: private detailed build map. It is ignored by git.
+- PLAN.md: private planning file. It is ignored by git.
+
+How To Run
+- Single instance:
+  npm start
+- Multiple demo identities should use separate storage:
+  npm start -- --storage /tmp/tifo-amina
+  npm start -- --storage /tmp/tifo-yassine
+  npm start -- --storage /tmp/tifo-salma
+- Reset demo storage only when intentionally starting fresh:
+  rm -rf /tmp/tifo-amina /tmp/tifo-yassine /tmp/tifo-salma
+
+How To Verify Current State
+- npm run lint
+- node --check electron/main.js
+- node --check renderer/app.js
+- node --check workers/main.js
+- node --check workers/tifo-room-state.js
+- Run the Phase 2 protocol test with node -e, requiring workers/tifo-room-state.js.
+- npm start -- --storage /tmp/tifo-smoke
+
+Known Lint Note
+- npm run lint has previously passed with existing Forge require-await warnings.
+  If warnings appear in forge.config.js, they are from the starter/Forge hooks and
+  are not Phase 1 blockers.
+
+Phase 2 Status
+Goal completed: the UI talks to the Bare worker through a small JSON protocol
+before real networking is added.
+
+Renderer sends these command messages:
+- profile:set
+- room:join
+- room:leave
+- chat:send
+- reaction:send
+- echo:replay
+
+Worker sends these event messages:
+- app:ready
+- room:joined
+- room:left
+- peer:count
+- sync:status
+- event:added
+- event:list
+- error
+
+Phase 2 implementation notes:
+- Keep the existing updater strings working: pear:applyUpdate, pear:updateApplied,
+  updating, updated.
+- For TIFO messages, send JSON.stringify({ type, ...payload }) over the existing
+  worker IPC bridge.
+- In the renderer, parse JSON worker messages first. If parsing fails, pass the
+  string to existing updater handling.
+- In the worker, parse JSON commands. If parsing fails and it is not an updater
+  message, log or return a structured error.
+- Validate required fields at the worker boundary.
+- Maintain room/session state in workers/tifo-room-state.js for Phase 2, even if
+  it is fake.
+- Renderer state should be updated from worker events, not from direct local
+  assumptions.
+
+Phase 2 Exit Gate
+- Worker startup emits app:ready. Done.
+- Joining a fake local room goes renderer -> worker -> renderer. Done.
+- Leaving the room goes renderer -> worker -> renderer and clears room state. Done.
+- Chat sends renderer -> worker -> renderer and appears in the timeline. Done.
+- Reaction sends renderer -> worker -> renderer and appears in the timeline. Done.
+- Unknown commands return a structured error. Done.
+- Worker exit/restart does not leave the UI pretending it is connected. Done.
+
+Phase 3 Plan
+Goal: prove two or three TIFO instances can discover each other and exchange
+basic messages through Hyperswarm.
+
+Phase 3 implementation direction:
+- Convert room code to a stable binary discovery topic.
+- Join Hyperswarm from the worker, not the renderer.
+- Track active peer connections in the worker.
+- Exchange JSON event envelopes over peer connections.
+- Keep peer count visible in renderer.
+- Deduplicate events by id.
+- Keep persistence out of Phase 3 unless absolutely needed; persistence is Phase 4.
+
+Important Product Rules
+- No backend server.
+- No accounts.
+- No cloud database.
+- No sports API dependency for the core demo.
+- Desktop-first.
+- Keep network behavior visible in the UI: peer count, sync state, local/pending
+  state, reconnect/catch-up state.
+- Do not add Tailwind or TypeScript until there is a strong reason. The current
+  starter is vanilla JS/CSS and this keeps Phase 2 simpler.
+
+Git State At Last Update
+- Branch: main.
+- Remote: github.com:hicksonhaziel/tifo.git.
+- Phase 1 commits were pushed before this file was created.
+- This file may be untracked until the user decides whether to commit it.
+
+If Something Is Unclear
+- Check official Pear docs first: https://docs.pears.com/
+- Prefer official Holepunch/Pear docs or repo examples over guesses.
+- If a feature is only a plan, say it is not implemented yet.
+- Do not present local-only UI placeholders as real P2P behavior.

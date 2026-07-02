@@ -282,6 +282,18 @@ p {
   line-height: 1.45;
 }
 
+.error-banner {
+  border: 1px solid rgba(229, 57, 53, 0.42);
+  border-radius: 8px;
+  background: rgba(229, 57, 53, 0.1);
+  color: #ffd5d4;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin-top: 14px;
+  padding: 10px 12px;
+}
+
 .join-form {
   display: grid;
   gap: 18px;

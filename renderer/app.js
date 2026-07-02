@@ -11,9 +11,10 @@ const state = {
   roomCode: 'MAR-DEMO-R16',
   roomTitle: '',
   workerStatus: 'starting',
-  syncStatus: 'Local preview',
+  syncStatus: 'Waiting for worker',
   peerCount: 0,
-  events: []
+  events: [],
+  lastError: ''
 }
 
 const reactionTypes = [
@@ -43,18 +44,63 @@ function formatTime(timestamp) {
   }).format(timestamp)
 }
 
-function normalizeRoomTitle(roomCode) {
-  return roomCode.trim().replaceAll('-', ' ').replace(/\s+/g, ' ').toUpperCase()
+function sendWorkerCommand(type, payload = {}) {
+  return bridge.writeWorkerIPC(workers.main, JSON.stringify({ ...payload, type }))
 }
 
-function addEvent(type, payload) {
-  state.events.unshift({
-    id: crypto.randomUUID(),
-    type,
-    sender: state.nickname || 'Local fan',
-    timestamp: Date.now(),
-    payload
-  })
+function upsertEvent(event) {
+  const existingIndex = state.events.findIndex((item) => item.id === event.id)
+  if (existingIndex >= 0) state.events.splice(existingIndex, 1)
+  state.events.unshift(event)
+}
+
+function applyWorkerMessage(message) {
+  switch (message.type) {
+    case 'app:ready':
+      state.workerStatus = 'ready'
+      state.syncStatus = message.syncStatus || 'Worker ready'
+      state.lastError = ''
+      break
+    case 'room:joined':
+      state.view = 'room'
+      state.nickname = message.profile.nickname
+      state.roomCode = message.room.code
+      state.roomTitle = message.room.title
+      state.peerCount = message.peerCount
+      state.syncStatus = message.syncStatus
+      state.events = message.events || []
+      state.lastError = ''
+      break
+    case 'room:left':
+      state.view = 'home'
+      state.roomTitle = ''
+      state.peerCount = 0
+      state.syncStatus = message.syncStatus || 'Worker ready'
+      state.events = message.events || []
+      state.lastError = ''
+      break
+    case 'peer:count':
+      state.peerCount = message.count
+      break
+    case 'sync:status':
+      state.syncStatus = message.status
+      break
+    case 'event:added':
+      upsertEvent(message.event)
+      state.lastError = ''
+      break
+    case 'event:list':
+      state.events = message.events || []
+      break
+    case 'error':
+      state.lastError = message.message || 'Worker error'
+      state.syncStatus = 'Error'
+      break
+    default:
+      console.warn('Unknown worker message type:', message.type)
+      return
+  }
+
   render()
 }
 
@@ -94,13 +140,18 @@ function renderHome() {
             <strong>Local preview</strong>
           </div>
         </div>
+        ${
+          state.lastError
+            ? `<p class="error-banner" role="status">${escapeHtml(state.lastError)}</p>`
+            : ''
+        }
       </section>
 
       <section class="join-panel" aria-labelledby="join-title">
         <div class="panel-heading">
           <p class="eyebrow">Join room</p>
           <h2 id="join-title">Enter a match room</h2>
-          <p class="panel-copy">Start with a local terrace preview. P2P sync comes next.</p>
+          <p class="panel-copy">Start with a local worker preview. P2P sync comes next.</p>
         </div>
         <form id="join-form" class="join-form">
           <label>
@@ -143,14 +194,14 @@ function renderHome() {
   document.getElementById('join-form').addEventListener('submit', (event) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    state.nickname = form.get('nickname').toString().trim()
-    state.roomCode = form.get('roomCode').toString().trim()
-    if (!state.nickname || !state.roomCode) return
+    const nickname = form.get('nickname').toString().trim()
+    const roomCode = form.get('roomCode').toString().trim()
+    if (!nickname || !roomCode) return
 
-    state.roomTitle = normalizeRoomTitle(state.roomCode)
-    state.view = 'room'
-    addEvent('system', {
-      text: `${state.nickname} entered ${state.roomTitle}`
+    sendWorkerCommand('profile:set', { nickname })
+    sendWorkerCommand('room:join', {
+      nickname,
+      roomCode
     })
   })
 }
@@ -194,7 +245,7 @@ function renderRoom() {
             alt=""
           />
           <div>
-            <p class="eyebrow">Local terrace preview</p>
+            <p class="eyebrow">${escapeHtml(state.syncStatus)}</p>
             <h1>${escapeHtml(state.roomTitle)}</h1>
           </div>
         </div>
@@ -221,15 +272,20 @@ function renderRoom() {
           <strong>${escapeHtml(state.roomCode)}</strong>
         </div>
       </section>
+      ${
+        state.lastError
+          ? `<p class="error-banner" role="status">${escapeHtml(state.lastError)}</p>`
+          : ''
+      }
 
       <section class="room-grid">
         <section class="chat-surface" aria-labelledby="chat-title">
           <div class="section-heading">
             <div>
               <h2 id="chat-title">Terrace chat</h2>
-              <p>Messages stay local in Phase 1.</p>
+              <p>Messages round-trip through the worker.</p>
             </div>
-            <span class="local-pill">Local only</span>
+            <span class="local-pill">Worker local</span>
           </div>
           <div class="chat-list" id="chat-list">
             ${renderChatItems()}
@@ -285,7 +341,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="timeline-title">Echo timeline</h2>
-              <p>Preview of the shared memory layer.</p>
+              <p>Worker-owned local event stream.</p>
             </div>
             <span>${state.events.length} events</span>
           </div>
@@ -301,10 +357,7 @@ function renderRoom() {
   `
 
   document.getElementById('leave-room').addEventListener('click', () => {
-    state.view = 'home'
-    state.syncStatus = 'Local preview'
-    state.peerCount = 0
-    render()
+    sendWorkerCommand('room:leave')
   })
 
   document.getElementById('chat-form').addEventListener('submit', (event) => {
@@ -313,15 +366,15 @@ function renderRoom() {
     const text = input.value.trim()
     if (!text) return
     input.value = ''
-    addEvent('chat', { text })
+    sendWorkerCommand('chat:send', { text })
   })
 
   for (const button of document.querySelectorAll('[data-reaction]')) {
     button.addEventListener('click', () => {
       const reaction = reactionTypes.find((item) => item.type === button.dataset.reaction)
       if (!reaction) return
-      addEvent('reaction', {
-        type: reaction.type,
+      sendWorkerCommand('reaction:send', {
+        reactionType: reaction.type,
         label: reaction.label
       })
     })
@@ -329,9 +382,7 @@ function renderRoom() {
 
   document.getElementById('replay-echo').addEventListener('click', () => {
     if (!hasEvents) return
-    addEvent('system', {
-      text: 'Replay Echo preview queued'
-    })
+    sendWorkerCommand('echo:replay')
   })
 }
 
@@ -375,8 +426,22 @@ function startWorker() {
   bridge.onWorkerIPC(workers.main, (data) => {
     const message = decoder.decode(data)
     console.log('worker ipc', '[', workers.main, ']:', message)
+
+    let parsed = null
+    try {
+      parsed = JSON.parse(message)
+    } catch {
+      parsed = null
+    }
+
+    if (parsed?.type) {
+      applyWorkerMessage(parsed)
+      return
+    }
+
     if (message === 'Hello from worker') {
       state.workerStatus = 'ready'
+      state.syncStatus = 'Worker ready'
       render()
       bridge.writeWorkerIPC(workers.main, 'TIFO renderer ready')
     }
@@ -385,6 +450,7 @@ function startWorker() {
   bridge.onWorkerExit(workers.main, (code) => {
     console.log('Worker exited with code', code)
     state.workerStatus = 'stopped'
+    state.syncStatus = 'Worker stopped'
     render()
   })
 }

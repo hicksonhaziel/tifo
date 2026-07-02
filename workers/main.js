@@ -4,6 +4,7 @@ const Corestore = require('corestore')
 const goodbye = require('graceful-goodbye')
 const FramedStream = require('framed-stream')
 const path = require('bare-path')
+const { createTifoRoomState } = require('./tifo-room-state')
 
 const pipe = new FramedStream(Bare.IPC)
 
@@ -34,6 +35,12 @@ console.log('Application storage:', pear.storage)
 pear.updater.on('updating', () => pipe.write('updating'))
 pear.updater.on('updated', () => pipe.write('updated'))
 
+function send(type, payload = {}) {
+  pipe.write(JSON.stringify({ type, ...payload }))
+}
+
+const roomState = createTifoRoomState({ send })
+
 goodbye(async () => {
   await swarm.destroy()
   await pear.close()
@@ -45,7 +52,36 @@ pipe.on('data', async (data) => {
   if (message === 'pear:applyUpdate') {
     await pear.updater.applyUpdate()
     pipe.write('pear:updateApplied')
-  } else console.log(message)
+    return
+  }
+
+  let command = null
+  try {
+    command = JSON.parse(message)
+  } catch {
+    console.log(message)
+    return
+  }
+
+  if (!command || typeof command !== 'object') {
+    send('error', {
+      command: 'unknown',
+      message: 'Command must be a JSON object'
+    })
+    return
+  }
+
+  if (typeof command.type !== 'string' || command.type.trim() === '') {
+    send('error', {
+      command: 'unknown',
+      message: 'Command type is required'
+    })
+    return
+  }
+
+  roomState.handleCommand(command)
 })
 
-pipe.write('Hello from worker')
+send('app:ready', {
+  syncStatus: 'Worker ready'
+})
