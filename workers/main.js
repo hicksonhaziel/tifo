@@ -4,8 +4,11 @@ const Corestore = require('corestore')
 const crypto = require('hypercore-crypto')
 const goodbye = require('graceful-goodbye')
 const FramedStream = require('framed-stream')
+const Protomux = require('protomux')
+const c = require('compact-encoding')
 const path = require('bare-path')
 const b4a = require('b4a')
+const { TifoEchoTimeline } = require('./tifo-echo-timeline')
 const { TifoEventLog } = require('./tifo-event-log')
 const { createTifoRoomState } = require('./tifo-room-state')
 
@@ -44,9 +47,10 @@ function send(type, payload = {}) {
 }
 
 const roomPeers = new Map()
-const roomProtocol = 'tifo-room-v1'
+const roomControlProtocol = 'tifo-room-control-v1'
 let roomTopic = null
-const eventLog = new TifoEventLog(store)
+const echoTimeline = new TifoEchoTimeline(store)
+const legacyEventLog = new TifoEventLog(store)
 
 const roomState = createTifoRoomState({
   send,
@@ -66,14 +70,24 @@ function peerIdFor(connection, peerInfo) {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+function normalizeKeyHex(key) {
+  if (b4a.isBuffer(key)) return b4a.toString(key, 'hex')
+  if (typeof key !== 'string') return null
+
+  const trimmed = key.trim().toLowerCase()
+  return /^[0-9a-f]{64}$/.test(trimmed) ? trimmed : null
+}
+
+function chooseBaseKey(leftKey, rightKey) {
+  return leftKey < rightKey ? leftKey : rightKey
+}
+
 function sendPeer(peer, message) {
-  if (peer.closed) return
-  peer.stream.write(
-    JSON.stringify({
-      protocol: roomProtocol,
-      ...message
-    })
-  )
+  if (peer.closed || !peer.controlMessage) return
+  peer.controlMessage.send({
+    room: roomState.state.room?.code || null,
+    ...message
+  })
 }
 
 function sendPeerSnapshot(peer) {
@@ -81,15 +95,14 @@ function sendPeerSnapshot(peer) {
   if (!room) return
 
   sendPeer(peer, {
-    type: 'hello',
-    room: room.code,
-    nickname: roomState.state.profile.nickname
+    type: 'identity',
+    nickname: roomState.state.profile.nickname,
+    echo: echoTimeline.getIdentity()
   })
-  sendPeer(peer, {
-    type: 'event:list',
-    room: room.code,
-    events: roomState.state.events
-  })
+}
+
+function sendAllPeerSnapshots() {
+  for (const peer of roomPeers.values()) sendPeerSnapshot(peer)
 }
 
 function updateRoomPeerStatus() {
@@ -103,95 +116,109 @@ function updateRoomPeerStatus() {
   })
 }
 
-function broadcastRoomMessage(message, exceptPeerId = null) {
-  for (const peer of roomPeers.values()) {
-    if (peer.id === exceptPeerId) continue
-    sendPeer(peer, message)
-  }
-}
-
-function broadcastRoomEvent(event) {
-  if (!roomState.state.room) return
-
-  broadcastRoomMessage({
-    type: 'event',
-    room: roomState.state.room.code,
-    event
-  })
-}
-
 function persistEvent(event) {
-  eventLog.append(event).catch((err) => {
+  echoTimeline.append(event).catch((err) => {
     send('error', {
-      command: 'event:persist',
+      command: 'echo:persist',
       message: err.message || 'Could not save event locally'
     })
   })
 }
 
 async function handleJoinRoom(room) {
-  const storedEvents = await eventLog.openRoom(room.code)
+  const storedEvents = await echoTimeline.openRoom(room.code, {
+    onUpdate: handleEchoTimelineUpdate
+  })
+  const migratedEvents = await migrateLegacyRoomEvents(room, storedEvents)
   joinRoomNetwork(room)
-  return storedEvents
+  return migratedEvents
 }
 
 async function handleLeaveRoom() {
   leaveRoomNetwork()
-  await eventLog.closeRoom()
+  await echoTimeline.closeRoom()
 }
 
 function handleLocalEvent(event) {
   persistEvent(event)
-  broadcastRoomEvent(event)
 }
 
 function handleRemoteEvent(event) {
   persistEvent(event)
 }
 
-function handlePeerMessage(peer, data) {
-  let message = null
+function handleEchoTimelineUpdate(events) {
+  roomState.mergeStoredEvents(events)
+}
+
+async function migrateLegacyRoomEvents(room, storedEvents) {
+  let legacyEvents = []
   try {
-    message = JSON.parse(data.toString())
-  } catch {
-    return
+    legacyEvents = await legacyEventLog.openRoom(room.code)
+  } catch (err) {
+    send('error', {
+      command: 'echo:migrate',
+      message: err.message || 'Could not read old room history'
+    })
+    return storedEvents
+  } finally {
+    await legacyEventLog.closeRoom().catch(() => {})
   }
 
-  const room = roomState.state.room
-  if (!room || message.protocol !== roomProtocol || message.room !== room.code) return
+  const seen = new Set(storedEvents.map((event) => event.id))
+  const missingEvents = legacyEvents.filter((event) => !seen.has(event.id))
+  if (missingEvents.length === 0) return storedEvents
 
-  if (message.type === 'hello') {
+  for (const event of missingEvents) await echoTimeline.append(event)
+  return echoTimeline.readAll()
+}
+
+async function handlePeerMessage(peer, message) {
+  const room = roomState.state.room
+  if (!room || !message || typeof message !== 'object' || message.room !== room.code) return
+
+  if (message.type === 'identity') {
     if (typeof message.nickname === 'string' && message.nickname.trim()) {
       peer.nickname = message.nickname.trim().slice(0, 24)
     }
+
+    await handlePeerIdentity(peer, message.echo)
+  }
+}
+
+async function handlePeerIdentity(peer, echo) {
+  const peerBaseKey = normalizeKeyHex(echo?.baseKey)
+  const peerWriterKey = normalizeKeyHex(echo?.writerKey)
+  const localIdentity = echoTimeline.getIdentity()
+  const localBaseKey = normalizeKeyHex(localIdentity.baseKey)
+
+  if (!peerBaseKey || !peerWriterKey || !localBaseKey) return
+
+  peer.baseKey = peerBaseKey
+  peer.writerKey = peerWriterKey
+
+  const chosenBaseKey = chooseBaseKey(localBaseKey, peerBaseKey)
+  if (chosenBaseKey !== localBaseKey) {
+    await echoTimeline.adoptBase(chosenBaseKey)
+    sendAllPeerSnapshots()
     return
   }
 
-  if (message.type === 'event') {
-    const addedEvent = roomState.addRemoteEvent(message.event)
-    if (addedEvent) {
-      broadcastRoomMessage(
-        {
-          type: 'event',
-          room: room.code,
-          event: addedEvent
-        },
-        peer.id
-      )
-    }
+  if (peerBaseKey !== localBaseKey) {
+    sendPeerSnapshot(peer)
     return
   }
 
-  if (message.type === 'event:list' && Array.isArray(message.events)) {
-    for (const event of message.events) roomState.addRemoteEvent(event)
-  }
+  const addedWriter = await echoTimeline.addWriter(peerWriterKey)
+  if (addedWriter) sendPeerSnapshot(peer)
 }
 
 function closeRoomPeer(peer) {
   if (peer.closed) return
   peer.closed = true
   roomPeers.delete(peer.id)
-  peer.stream.destroy()
+  if (peer.channel) peer.channel.close()
+  peer.connection.destroy()
   updateRoomPeerStatus()
 }
 
@@ -208,18 +235,50 @@ function handleRoomConnection(connection, peerInfo) {
   const peer = {
     id,
     nickname: '',
-    stream: new FramedStream(connection),
+    baseKey: null,
+    writerKey: null,
+    connection,
+    channel: null,
+    controlMessage: null,
     closed: false
   }
-  roomPeers.set(id, peer)
 
-  peer.stream.on('data', (data) => handlePeerMessage(peer, data))
-  peer.stream.on('error', () => closeRoomPeer(peer))
-  peer.stream.on('close', () => closeRoomPeer(peer))
+  const mux = Protomux.from(connection)
+  echoTimeline.replicate(mux)
+
+  peer.channel = mux.createChannel({
+    protocol: roomControlProtocol,
+    id: roomTopic,
+    onopen() {
+      sendPeerSnapshot(peer)
+    },
+    onclose() {
+      closeRoomPeer(peer)
+    }
+  })
+
+  if (!peer.channel) {
+    connection.destroy()
+    return
+  }
+
+  peer.controlMessage = peer.channel.addMessage({
+    encoding: c.json,
+    onmessage(message) {
+      handlePeerMessage(peer, message).catch((err) => {
+        send('error', {
+          command: 'peer:message',
+          message: err.message || 'Could not handle peer message'
+        })
+      })
+    }
+  })
+
+  roomPeers.set(id, peer)
+  peer.channel.open()
   connection.on('close', () => closeRoomPeer(peer))
 
   updateRoomPeerStatus()
-  sendPeerSnapshot(peer)
 }
 
 function joinRoomNetwork(room) {
@@ -264,7 +323,8 @@ roomSwarm.on('connection', handleRoomConnection)
 roomSwarm.on('update', updateRoomPeerStatus)
 
 goodbye(async () => {
-  await eventLog.closeRoom()
+  await echoTimeline.closeRoom()
+  await legacyEventLog.closeRoom()
   await roomSwarm.destroy()
   await swarm.destroy()
   await pear.close()

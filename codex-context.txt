@@ -12,9 +12,9 @@ Phase 0 is complete.
 Phase 1 is complete.
 Phase 2 is complete.
 Phase 3 is complete and pushed.
-Phase 4 code is implemented locally and needs manual restart/reconnect testing
-before commit/push.
-Next phase after Phase 4 is verified is Phase 5: Autobase Echo Timeline.
+Phase 4 is complete and pushed.
+Phase 5 is implemented locally and needs two-window manual testing before
+commit/push.
 
 What Is Implemented Now
 - Repo is based on Holepunch's hello-pear-electron starter.
@@ -30,26 +30,42 @@ What Is Implemented Now
 - Fake local room join/leave now happens through workers/main.js.
 - Chat, reaction, and Echo replay preview events round-trip through the worker.
 - Unknown worker commands return structured error messages.
-- Hyperswarm room discovery and framed peer-to-peer JSON event exchange are
-  implemented locally for Phase 3.
+- Hyperswarm room discovery is implemented.
+- Phase 3 originally used framed peer-to-peer JSON event exchange.
 - Room code is converted to a deterministic 32-byte Hyperswarm topic.
-- Local events are broadcast to connected peers.
+- Phase 5 room sockets now use Protomux so a control channel and Autobase feed
+  replication can share the same Hyperswarm connection.
+- Peers exchange room identity messages containing Autobase base and writer keys.
+- If two peers created different Autobase bases for the same room, the lower
+  base key wins and the other peer reopens on that shared base.
+- Existing local events are queued and re-appended after a peer adopts the shared
+  base and becomes writable.
+- Writable peers append writer:add records so Autobase can call host.addWriter()
+  for new peer writer feeds.
+- Local room events are appended to the local Autobase writer feed.
+- Remote room events are now expected to arrive through Autobase feed replication
+  and materialized view updates, not through JSON event broadcasts.
 - Remote events are sanitized, deduplicated by id, and displayed in the timeline.
 - Leaving a room closes the active room sockets because Hyperswarm leave() does
   not close existing connections by itself.
-- Local room events are persisted to a per-room Hypercore through Corestore.
-- Room history is loaded from Corestore when rejoining with the same storage path.
-- New local and accepted remote events are appended to the local event log.
+- Local room events were previously persisted to a per-room Hypercore through
+  Corestore in Phase 4.
+- Phase 5 uses an Autobase-backed Echo timeline for accepted room events.
+- Room history is loaded from the Autobase materialized view when rejoining with
+  the same storage path.
+- New local and accepted remote events are appended to the Echo timeline.
+- Phase 5 close/reopen null-key guard is implemented in TifoEchoTimeline.
+- Room UI has been cleaned up into a clearer match dashboard with stronger sync
+  state, match summary, chat, action, and Echo timeline sections.
 - The room UI shows live P2P state, saved event count, peer-event count, and
   local/peer/saved event badges.
 - BUILD.md and PLAN.md are private local planning files and ignored by git.
 - package.json uses CommonJS and vanilla JS/CSS. No Tailwind and no TypeScript yet.
 
 What Is Not Implemented Yet
-- Phase 4 has not been manually verified with app restart/reconnect yet.
-- Corestore feed replication over the Hyperswarm room socket is not implemented
-  yet. Reconnect catch-up still uses the Phase 3 framed JSON event exchange.
-- No Autobase merged Echo timeline yet.
+- Phase 5 has not been manually verified in two real app windows yet.
+- Persisting the adopted shared Autobase base key for future restarts is not
+  implemented yet; a peer can adopt again when it reconnects to another peer.
 - No audio chant recording yet.
 - No replay Echo mode yet.
 - No offline/reconnect demo yet.
@@ -73,21 +89,31 @@ Pear Docs Checked
   strings over writeWorkerIPC/onWorkerIPC using a message type field.
 - Pear docs say P2P app logic belongs in the Bare worker, where Hyperswarm and
   Corestore are available.
-- Pear docs describe a production chat shape with a separate Bare worker,
-  Autobase-backed shared room, Corestore persistence, and JSON over a framed pipe.
+- Pear docs describe a production chat shape with a separate Bare worker and
+  Autobase-backed shared room.
+- Autobase docs say writer nodes are linearized into an eventually consistent
+  view and host.addWriter() adds writer keys to the base.
+- Corestore/Hypercore docs say replication can attach to a Protomux protocol
+  stream, which allows replication and TIFO control messages on one socket.
 - Reference URLs:
   https://docs.pears.com/getting-started/from-a-template/start-from-hello-pear-electron/
   https://docs.pears.com/getting-started/build-a-peer-to-peer-chat/reshape-into-a-production-app/
+  https://docs.pears.com/reference/building-blocks/autobase/
   https://docs.pears.com/
 
 Important Files
 - package.json: app metadata, scripts, dependencies, pear upgrade link.
 - electron/main.js: Electron window, app identity, worker launch/proxy.
 - electron/preload.js: exposes safe window.bridge methods to renderer.
-- workers/main.js: Bare worker, PearRuntime updater, future P2P backend.
+- workers/main.js: Bare worker, PearRuntime updater, P2P backend, Echo storage.
 - workers/tifo-room-state.js: testable local Phase 2 room command/event state.
-- workers/main.js also owns Phase 3 Hyperswarm room networking for now.
-- workers/tifo-event-log.js: Phase 4 Corestore/Hypercore local event log.
+- workers/main.js owns Hyperswarm room networking, Protomux room control, peer
+  identity handling, shared base selection, writer-key exchange, and migration
+  from the old Phase 4 log.
+- workers/tifo-event-log.js: old Phase 4 Corestore/Hypercore local event log.
+- workers/tifo-echo-timeline.js: Phase 5 Autobase-backed Echo timeline,
+  replication attachment, base adoption, writer-add records, and pending event
+  flushing.
 - renderer/app.js: current UI and worker-backed local preview flow.
 - renderer/styles.css: current Phase 1 styling.
 - assets/brand/: extracted TIFO brand assets.
@@ -112,9 +138,12 @@ How To Verify Current State
 - node --check renderer/app.js
 - node --check workers/main.js
 - node --check workers/tifo-room-state.js
-- node --check workers/tifo-event-log.js
+- node --check workers/tifo-echo-timeline.js
 - Run the Phase 2 protocol test with node -e, requiring workers/tifo-room-state.js.
-- Run the Phase 4 event log reopen test with node -e, requiring workers/tifo-event-log.js.
+- Run the Phase 5 Echo timeline reopen test with node -e, requiring
+  workers/tifo-echo-timeline.js.
+- Run the Phase 5 two-peer adoption smoke test with node -e, requiring
+  workers/tifo-echo-timeline.js.
 - npm start -- --storage /tmp/tifo-smoke
 
 Known Lint Note
@@ -192,7 +221,7 @@ Phase 3 manual test:
 - Leave one room and confirm the other peer count drops.
 
 Phase 4 Status
-Goal in progress locally: persist room events with Corestore/Hypercore so history
+Goal complete and pushed: persist room events with Corestore/Hypercore so history
 survives restart.
 
 Phase 4 implementation status:
@@ -205,7 +234,7 @@ Phase 4 implementation status:
 - Replicate local Hypercore feeds directly over peer connections. Not implemented;
   current reconnect catch-up is still JSON event-list exchange.
 
-Phase 4 manual test needed before commit/push:
+Phase 4 manual test:
 - Start one app: npm start -- --storage /tmp/tifo-phase4-amina
 - Join MAR-DEMO-R16 as Amina.
 - Send at least one chat and one reaction.
@@ -214,6 +243,55 @@ Phase 4 manual test needed before commit/push:
 - Confirm previous events appear with saved/local state.
 - Optional: start a second app with /tmp/tifo-phase4-yassine, join the same room,
   and confirm current P2P event exchange still works.
+
+Phase 5 Status
+Goal implemented locally and awaiting manual app verification: move the Echo
+timeline onto Autobase and use replicated writer feeds as the room sync path.
+
+Phase 5 implementation status:
+- Added autobase dependency. Implemented locally.
+- Added workers/tifo-echo-timeline.js. Implemented locally.
+- Open a deterministic Autobase namespace per room code. Implemented locally.
+- Apply Autobase nodes into an echo-timeline materialized view. Implemented
+  locally.
+- Append local and accepted remote room events to Autobase instead of the old
+  Phase 4 Hypercore log. Implemented locally.
+- Load stored events from the Autobase view on room join. Implemented locally.
+- Local reopen smoke test passed.
+- Add Protomux room control channel over Hyperswarm sockets. Implemented locally.
+- Attach Autobase/Corestore replication to the same Protomux socket. Implemented
+  locally.
+- Exchange base/writer keys in peer identity messages. Implemented locally.
+- Choose a shared base when peers created different local bases. Implemented
+  locally.
+- Reopen onto the chosen shared base and re-append pending local events.
+  Implemented locally.
+- Append writer:add records and call host.addWriter() from the Autobase apply
+  handler. Implemented locally.
+- Replace the Phase 3 JSON event-list catch-up with Autobase feed replication.
+  Implemented locally.
+- Local two-peer adoption smoke test passed.
+- Manual two-window app test still needed before commit/push.
+- Close/reopen null-key crash guard added after manual testing surfaced
+  "Cannot read properties of null (reading 'key')".
+- Room UI pass added after manual testing feedback.
+
+Phase 5 manual test before commit/push:
+- Run npm run lint.
+- Run node --check for electron/main.js, renderer/app.js, workers/main.js,
+  workers/tifo-room-state.js, and workers/tifo-echo-timeline.js.
+- Start one app: npm start -- --storage /tmp/tifo-phase5-amina
+- Join MAR-DEMO-R16 as Amina.
+- Send at least one chat and one reaction.
+- Quit the app fully.
+- Start again with the same storage path and rejoin the same room.
+- Confirm previous events appear with saved/local state.
+- Start a second app: npm start -- --storage /tmp/tifo-phase5-yassine
+- Join the same room as Yassine.
+- Confirm both windows show P2P connected.
+- Send a chat from Amina and confirm it appears in Yassine.
+- Send a chat/reaction from Yassine and confirm it appears in Amina.
+- Watch for peer count drops when either side leaves.
 
 Important Product Rules
 - No backend server.
@@ -230,7 +308,8 @@ Git State At Last Update
 - Branch: main.
 - Remote: github.com:hicksonhaziel/tifo.git.
 - Phase 3 was pushed as ba4ac7f Add first P2P room sync.
-- Phase 4 is local and not pushed until restart/reconnect testing passes.
+- Phase 4 was pushed as 74cbd3a Persist room events locally.
+- Phase 5 Autobase work is local and not pushed until two-window testing passes.
 
 If Something Is Unclear
 - Check official Pear docs first: https://docs.pears.com/

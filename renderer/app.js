@@ -263,6 +263,8 @@ function renderRoom() {
   const hasEvents = metrics.playableEvents.length > 0
   const match = roomParts(state.roomCode)
   const latestEvent = metrics.playableEvents[0]
+  const connected = state.peerCount > 0
+  const syncTone = state.lastError ? 'error' : connected ? 'connected' : 'searching'
   const timeline = state.events
     .map((event) => {
       const meta = eventMeta(event)
@@ -302,9 +304,9 @@ function renderRoom() {
           </div>
         </div>
         <div class="room-actions">
-          <span class="live-badge ${state.peerCount > 0 ? 'connected' : ''}">
+          <span class="live-badge ${connected ? 'connected' : ''}">
             <span aria-hidden="true"></span>
-            ${escapeHtml(state.peerCount > 0 ? 'P2P live' : 'Seeking peers')}
+            ${escapeHtml(connected ? 'P2P live' : 'Seeking peers')}
           </span>
           <button class="ghost-action" id="leave-room" type="button">Leave</button>
         </div>
@@ -312,14 +314,24 @@ function renderRoom() {
 
       <section class="room-stage" aria-label="Match summary">
         <div class="scoreboard">
-          <span class="score-team">${escapeHtml(match.home)}</span>
-          <span class="score-divider">vs</span>
-          <span class="score-team muted">${escapeHtml(match.away)}</span>
-          <span class="score-round">${escapeHtml(match.round)}</span>
+          <div class="score-team-block">
+            <span class="team-label">Home</span>
+            <strong>${escapeHtml(match.home)}</strong>
+          </div>
+          <div class="score-core">
+            <span>${escapeHtml(match.round)}</span>
+            <strong>vs</strong>
+            <small>${escapeHtml(state.roomCode)}</small>
+          </div>
+          <div class="score-team-block muted">
+            <span class="team-label">Away</span>
+            <strong>${escapeHtml(match.away)}</strong>
+          </div>
         </div>
-        <div class="stage-summary">
-          <span>${escapeHtml(state.syncStatus)}</span>
-          <strong>${latestEvent ? escapeHtml(eventMeta(latestEvent).text) : 'Terrace is forming'}</strong>
+        <div class="stage-summary ${syncTone}">
+          <span>Room sync</span>
+          <strong>${escapeHtml(state.syncStatus)}</strong>
+          <p>${latestEvent ? escapeHtml(eventMeta(latestEvent).text) : 'Waiting for the first chant, flare, or message.'}</p>
         </div>
       </section>
 
@@ -329,12 +341,12 @@ function renderRoom() {
           <strong>${escapeHtml(state.nickname)}</strong>
         </div>
         <div>
-          <span class="status-label">Peers</span>
+          <span class="status-label">Peers live</span>
           <strong>${state.peerCount}</strong>
         </div>
         <div>
-          <span class="status-label">Sync</span>
-          <strong>${escapeHtml(state.syncStatus)}</strong>
+          <span class="status-label">Echo events</span>
+          <strong>${state.events.length}</strong>
         </div>
         <div>
           <span class="status-label">Saved</span>
@@ -352,9 +364,9 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="chat-title">Terrace chat</h2>
-              <p>${metrics.chats} messages</p>
+              <p>${metrics.chats} messages from this room</p>
             </div>
-            <span class="local-pill">P2P room</span>
+            <span class="local-pill ${connected ? 'connected' : ''}">${connected ? 'Live sync' : 'Local first'}</span>
           </div>
           <div class="chat-list" id="chat-list">
             ${renderChatItems()}
@@ -373,8 +385,8 @@ function renderRoom() {
         <aside class="controls-surface" aria-labelledby="controls-title">
           <div class="section-heading">
             <div>
-              <h2 id="controls-title">Match controls</h2>
-              <p>${metrics.reactions} reactions</p>
+              <h2 id="controls-title">Terrace actions</h2>
+              <p>${metrics.reactions} reactions sent</p>
             </div>
           </div>
           <div class="reaction-grid">
@@ -410,9 +422,9 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="timeline-title">Echo timeline</h2>
-              <p>${metrics.peerEvents} peer events</p>
+              <p>${metrics.peerEvents} peer events, ${metrics.saved} saved</p>
             </div>
-            <span>${state.events.length} events</span>
+            <span class="timeline-count">${state.events.length} events</span>
           </div>
           <ol class="timeline-list">
             ${
