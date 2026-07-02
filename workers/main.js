@@ -26,6 +26,7 @@ const updaterConfig = {
 
 const store = new Corestore(path.join(updaterConfig.dir, 'pear-runtime/corestore'))
 const swarm = new Hyperswarm()
+const appSwarm = new Hyperswarm()
 const roomSwarm = new Hyperswarm()
 const pear = new PearRuntime({ ...updaterConfig, swarm, store })
 
@@ -48,6 +49,8 @@ function send(type, payload = {}) {
 }
 
 const roomPeers = new Map()
+const appPeers = new Map()
+const appPresenceTopic = crypto.namespace('tifo-app-presence:v1', 1)[0]
 const roomControlProtocol = 'tifo-room-control-v1'
 const chantMaxBytes = 2 * 1024 * 1024
 const chatVoiceMaxBytes = 5 * 1024 * 1024
@@ -213,12 +216,52 @@ function sendOfflineState(payload = {}) {
   })
 }
 
+function sendAppPeerStatus() {
+  send('app-peer:count', { count: appPeers.size })
+}
+
 function queuePendingSync(event) {
   if (!event?.id) return
   pendingSyncEventIds.add(event.id)
   inflightSyncEventIds.delete(event.id)
   lastPendingFlushCount = 0
   sendOfflineState()
+}
+
+function closeAppPeer(peer) {
+  if (peer.closed) return
+  peer.closed = true
+  appPeers.delete(peer.id)
+  peer.connection.destroy()
+  sendAppPeerStatus()
+}
+
+function handleAppConnection(connection, peerInfo) {
+  const id = peerIdFor(connection, peerInfo)
+  const existing = appPeers.get(id)
+  if (existing) closeAppPeer(existing)
+
+  const peer = {
+    id,
+    connection,
+    closed: false
+  }
+
+  appPeers.set(id, peer)
+  connection.on('close', () => closeAppPeer(peer))
+  sendAppPeerStatus()
+}
+
+function startAppPresence() {
+  const discovery = appSwarm.join(appPresenceTopic, {
+    client: true,
+    server: true
+  })
+
+  discovery
+    .flushed()
+    .then(sendAppPeerStatus)
+    .catch(() => {})
 }
 
 function sendPeer(peer, message) {
@@ -235,13 +278,27 @@ function sendPeerSnapshot(peer) {
 
   sendPeer(peer, {
     type: 'identity',
-    nickname: roomState.state.profile.nickname,
+    nickname: roomState.state.profile.nickname || roomState.state.profile.displayName,
+    profile: roomState.state.profile,
     echo: echoTimeline.getIdentity()
   })
 }
 
+function sendPeerEventSnapshot(peer) {
+  const room = roomState.state.room
+  if (!room) return
+
+  sendPeer(peer, {
+    type: 'event:snapshot',
+    events: roomState.state.events
+  })
+}
+
 function sendAllPeerSnapshots() {
-  for (const peer of roomPeers.values()) sendPeerSnapshot(peer)
+  for (const peer of roomPeers.values()) {
+    sendPeerSnapshot(peer)
+    sendPeerEventSnapshot(peer)
+  }
 }
 
 function nudgePeersToRefresh() {
@@ -343,8 +400,8 @@ function updateRoomPeerStatus() {
     send('sync:status', {
       status:
         pendingSyncEventIds.size === 0
-          ? 'Offline demo: local only'
-          : `Offline demo: ${pendingSyncEventIds.size} pending`
+          ? 'Offline mode: local only'
+          : `Offline mode: ${pendingSyncEventIds.size} pending`
     })
     sendOfflineState()
     return
@@ -398,7 +455,7 @@ async function handleJoinRoom(room) {
   })
   const migratedEvents = await migrateLegacyRoomEvents(room, storedEvents)
   if (simulatedOffline) {
-    send('sync:status', { status: 'Offline demo: local only' })
+    send('sync:status', { status: 'Offline mode: local only' })
     sendOfflineState()
   } else {
     joinRoomNetwork(room)
@@ -511,8 +568,8 @@ async function setSimulatedOffline(enabled) {
     send('sync:status', {
       status:
         pendingSyncEventIds.size === 0
-          ? 'Offline demo: local only'
-          : `Offline demo: ${pendingSyncEventIds.size} pending`
+          ? 'Offline mode: local only'
+          : `Offline mode: ${pendingSyncEventIds.size} pending`
     })
     sendOfflineState()
     return
@@ -1480,17 +1537,56 @@ async function handlePeerMessage(peer, message) {
   if (!room || !message || typeof message !== 'object' || message.room !== room.code) return
 
   if (message.type === 'identity') {
-    if (typeof message.nickname === 'string' && message.nickname.trim()) {
-      peer.nickname = message.nickname.trim().slice(0, 24)
+    const profile =
+      message.profile && typeof message.profile === 'object' ? message.profile : { ...message }
+    const nickname =
+      typeof profile.displayName === 'string' && profile.displayName.trim()
+        ? profile.displayName
+        : typeof profile.nickname === 'string' && profile.nickname.trim()
+          ? profile.nickname
+          : typeof message.nickname === 'string'
+            ? message.nickname
+            : ''
+
+    if (nickname.trim()) {
+      peer.nickname = nickname.trim().slice(0, 24)
     }
 
     await handlePeerIdentity(peer, message.echo)
+    sendPeerEventSnapshot(peer)
     return
   }
 
   if (message.type === 'echo:refresh') {
     await echoTimeline.refresh()
     sendPeerSnapshot(peer)
+    sendPeerEventSnapshot(peer)
+    return
+  }
+
+  if (message.type === 'event:snapshot') {
+    const events = Array.isArray(message.events)
+      ? [...message.events].sort((left, right) => {
+          const leftTime = Number.isFinite(left?.timestamp) ? left.timestamp : 0
+          const rightTime = Number.isFinite(right?.timestamp) ? right.timestamp : 0
+          return leftTime - rightTime
+        })
+      : []
+    let addedCount = 0
+
+    for (const event of events) {
+      const addedEvent = roomState.addRemoteEvent(event)
+      if (!addedEvent) continue
+      addedCount += 1
+      broadcastRoomEvent(addedEvent, peer.id)
+    }
+
+    if (addedCount > 0) {
+      await echoTimeline.refresh()
+      send('sync:status', {
+        status: `P2P caught up: ${addedCount} event${addedCount === 1 ? '' : 's'}`
+      })
+    }
     return
   }
 
@@ -1631,6 +1727,7 @@ function handleRoomConnection(connection, peerInfo) {
     id: roomTopic,
     onopen() {
       sendPeerSnapshot(peer)
+      sendPeerEventSnapshot(peer)
       flushPendingSyncEvents()
     },
     onclose() {
@@ -1666,7 +1763,7 @@ function handleRoomConnection(connection, peerInfo) {
 function joinRoomNetwork(room) {
   leaveRoomNetwork()
   if (simulatedOffline) {
-    send('sync:status', { status: 'Offline demo: local only' })
+    send('sync:status', { status: 'Offline mode: local only' })
     sendOfflineState()
     return
   }
@@ -1714,13 +1811,18 @@ function leaveRoomNetwork() {
   send('peer:count', { count: 0 })
 }
 
+appSwarm.on('connection', handleAppConnection)
+appSwarm.on('update', sendAppPeerStatus)
 roomSwarm.on('connection', handleRoomConnection)
 roomSwarm.on('update', updateRoomPeerStatus)
+
+startAppPresence()
 
 goodbye(async () => {
   stopEchoRefresh()
   await echoTimeline.closeRoom()
   await legacyEventLog.closeRoom()
+  await appSwarm.destroy()
   await roomSwarm.destroy()
   await swarm.destroy()
   await pear.close()
@@ -1790,5 +1892,6 @@ pipe.on('data', async (data) => {
 })
 
 send('app:ready', {
+  appPeerCount: appPeers.size,
   syncStatus: 'Worker ready'
 })

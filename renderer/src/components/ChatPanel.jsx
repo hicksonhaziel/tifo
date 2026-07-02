@@ -1,9 +1,9 @@
-import { ImagePlus, Mic, Send, SmilePlus, StopCircle } from 'lucide-react'
+import { Check, ImagePlus, Mic, Pencil, Send, SmilePlus, StopCircle, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import 'emoji-picker-element'
 import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
 
-import { eventStatus, eventStatusLabel } from '../tifo/domain.js'
+import { eventStatus, eventStatusLabel, materializeChatEvents } from '../tifo/domain.js'
 import { formatBytes, formatDuration, formatTime } from '../tifo/format.js'
 
 export function ChatPanel({ actions, connected, derived, metrics, offlineActive, state }) {
@@ -11,6 +11,9 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
   const chatInputRef = useRef(null)
   const emojiPickerRef = useRef(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [emojiTargetId, setEmojiTargetId] = useState('')
+  const [editingId, setEditingId] = useState('')
+  const [editDraft, setEditDraft] = useState('')
   const voiceRecording = state.chatMedia.voiceStatus === 'recording'
   const voiceSaving = state.chatMedia.voiceStatus === 'saving'
   const imageSaving = state.chatMedia.imageStatus === 'saving'
@@ -23,12 +26,20 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
 
     function handleEmojiClick(event) {
       const unicode = event.detail?.unicode
-      if (unicode) insertEmoji(unicode)
+      if (!unicode) return
+      if (emojiTargetId) {
+        actions.reactToChatEvent(emojiTargetId, unicode)
+        setEmojiOpen(false)
+        setEmojiTargetId('')
+        return
+      }
+
+      insertEmoji(unicode)
     }
 
     picker.addEventListener('emoji-click', handleEmojiClick)
     return () => picker.removeEventListener('emoji-click', handleEmojiClick)
-  }, [emojiOpen, state.chatDraft])
+  }, [emojiOpen, emojiTargetId, state.chatDraft])
 
   function submitChat(event) {
     event.preventDefault()
@@ -54,6 +65,32 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
     })
   }
 
+  function openComposerEmoji() {
+    setEmojiTargetId('')
+    setEmojiOpen((open) => (emojiTargetId ? true : !open))
+  }
+
+  function openReactionPicker(eventId) {
+    setEmojiTargetId(eventId)
+    setEmojiOpen(true)
+  }
+
+  function startEditing(event) {
+    setEditingId(event.id)
+    setEditDraft(event.payload.text || '')
+  }
+
+  function cancelEditing() {
+    setEditingId('')
+    setEditDraft('')
+  }
+
+  function saveEdit(event) {
+    event.preventDefault()
+    actions.editChatMessage(editingId, editDraft)
+    cancelEditing()
+  }
+
   return (
     <section className='chat-surface' aria-labelledby='chat-title'>
       <div className='section-heading'>
@@ -68,8 +105,20 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
         </span>
       </div>
       <div className='chat-list' id='chat-list'>
-        <ChatItems actions={actions} derived={derived} state={state} />
+        <ChatItems
+          actions={actions}
+          derived={derived}
+          editDraft={editDraft}
+          editingId={editingId}
+          onCancelEdit={cancelEditing}
+          onEditDraftChange={setEditDraft}
+          onReact={openReactionPicker}
+          onSaveEdit={saveEdit}
+          onStartEdit={startEditing}
+          state={state}
+        />
       </div>
+      {emojiOpen && emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
       <form id='chat-form' className='chat-form' onSubmit={submitChat}>
         <input
           id='chat-input'
@@ -91,7 +140,7 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
           className={`chat-media-action ${emojiOpen ? 'active' : ''}`}
           type='button'
           title='Add emoji'
-          onClick={() => setEmojiOpen((open) => !open)}
+          onClick={openComposerEmoji}
         >
           <SmilePlus size={16} strokeWidth={2.4} />
         </button>
@@ -128,17 +177,21 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
           Send
         </button>
       </form>
-      {emojiOpen ? (
-        <div className='emoji-picker-popover'>
-          <emoji-picker
-            className='tifo-emoji-picker'
-            data-source={emojiDataUrl}
-            ref={emojiPickerRef}
-          ></emoji-picker>
-        </div>
-      ) : null}
+      {emojiOpen && !emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
       <ChatMediaStatus state={state} />
     </section>
+  )
+}
+
+function EmojiPickerPopover({ pickerRef }) {
+  return (
+    <div className='emoji-picker-popover'>
+      <emoji-picker
+        className='tifo-emoji-picker'
+        data-source={emojiDataUrl}
+        ref={pickerRef}
+      ></emoji-picker>
+    </div>
   )
 }
 
@@ -169,29 +222,128 @@ function ChatMediaStatus({ state }) {
   )
 }
 
-function ChatItems({ actions, derived, state }) {
-  const chatEvents = state.events.filter((event) => ['chat', 'chat-media'].includes(event.type))
+function ChatItems({
+  actions,
+  derived,
+  editDraft,
+  editingId,
+  onCancelEdit,
+  onEditDraftChange,
+  onReact,
+  onSaveEdit,
+  onStartEdit,
+  state
+}) {
+  const chatEvents = materializeChatEvents(state.events, state.profile)
   if (chatEvents.length === 0) {
     return <div className='empty-state'>No messages yet.</div>
   }
 
   return chatEvents.map((event) => {
     const status = eventStatus(event, state)
+    const own = event.chatState?.own === true
     return (
       <article className={`chat-message ${status}`} key={event.id}>
-        <div>
+        <div className='chat-message-header'>
           <strong>{event.sender}</strong>
           <span>{formatTime(event.timestamp)}</span>
         </div>
-        <ChatMessageBody actions={actions} derived={derived} event={event} />
-        <span className={`message-status ${status}`}>{eventStatusLabel(event, state)}</span>
+        <ChatMessageBody
+          actions={actions}
+          derived={derived}
+          editDraft={editDraft}
+          editing={editingId === event.id}
+          event={event}
+          onCancelEdit={onCancelEdit}
+          onEditDraftChange={onEditDraftChange}
+          onSaveEdit={onSaveEdit}
+        />
+        <ChatReactionBar
+          actions={actions}
+          event={event}
+          onReact={onReact}
+          reactions={event.chatState?.reactions || []}
+        />
+        <div className='chat-message-footer'>
+          <span className={`message-status ${status}`}>{eventStatusLabel(event, state)}</span>
+          <div className='chat-message-actions'>
+            <button
+              className='chat-inline-action'
+              type='button'
+              title='React'
+              onClick={() => onReact(event.id)}
+            >
+              <SmilePlus size={14} strokeWidth={2.4} />
+            </button>
+            {own && event.type === 'chat' ? (
+              <button
+                className='chat-inline-action'
+                type='button'
+                title='Edit message'
+                onClick={() => onStartEdit(event)}
+              >
+                <Pencil size={14} strokeWidth={2.4} />
+              </button>
+            ) : null}
+            {own ? (
+              <button
+                className='chat-inline-action danger'
+                type='button'
+                title='Delete message'
+                onClick={() => actions.deleteChatEvent(event.id)}
+              >
+                <Trash2 size={14} strokeWidth={2.4} />
+              </button>
+            ) : null}
+          </div>
+        </div>
       </article>
     )
   })
 }
 
-function ChatMessageBody({ actions, derived, event }) {
-  if (event.type === 'chat') return <p>{event.payload.text}</p>
+function ChatMessageBody({
+  actions,
+  derived,
+  editDraft,
+  editing,
+  event,
+  onCancelEdit,
+  onEditDraftChange,
+  onSaveEdit
+}) {
+  if (event.type === 'chat') {
+    if (editing) {
+      return (
+        <form className='chat-edit-form' onSubmit={onSaveEdit}>
+          <input
+            autoFocus
+            maxLength='180'
+            value={editDraft}
+            onChange={(changeEvent) => onEditDraftChange(changeEvent.currentTarget.value)}
+          />
+          <button className='chat-inline-action' type='submit' title='Save edit'>
+            <Check size={14} strokeWidth={2.4} />
+          </button>
+          <button
+            className='chat-inline-action'
+            type='button'
+            title='Cancel edit'
+            onClick={onCancelEdit}
+          >
+            <X size={14} strokeWidth={2.4} />
+          </button>
+        </form>
+      )
+    }
+
+    return (
+      <p>
+        {event.payload.text}
+        {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
+      </p>
+    )
+  }
 
   const mediaUrl = derived.chatMediaUrls.get(event.id)
   const isLoading = derived.pendingChatMediaLoads.has(event.id)
@@ -234,6 +386,36 @@ function ChatMessageBody({ actions, derived, event }) {
         </button>
       )}
       <small>{formatBytes(payload.size)}</small>
+    </div>
+  )
+}
+
+function ChatReactionBar({ actions, event, onReact, reactions }) {
+  return (
+    <div className='chat-reaction-row'>
+      {reactions.map((reaction) => (
+        <button
+          className={`chat-reaction-pill ${reaction.reactedByMe ? 'active' : ''}`}
+          data-reactors={reaction.names.join(', ')}
+          key={reaction.emoji}
+          title={reaction.names.join(', ')}
+          type='button'
+          onClick={() => actions.reactToChatEvent(event.id, reaction.emoji)}
+        >
+          <span>{reaction.emoji}</span>
+          <strong>{reaction.count}</strong>
+        </button>
+      ))}
+      {reactions.length > 0 ? (
+        <button
+          className='chat-reaction-add'
+          type='button'
+          title='Add reaction'
+          onClick={() => onReact(event.id)}
+        >
+          <SmilePlus size={13} strokeWidth={2.4} />
+        </button>
+      ) : null}
     </div>
   )
 }

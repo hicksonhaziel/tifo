@@ -66,6 +66,101 @@ export function eventMeta(event) {
   }
 }
 
+export function chatEventTypes() {
+  return ['chat', 'chat-media']
+}
+
+export function timelineEventTypes() {
+  return ['clip', 'chant', 'reaction']
+}
+
+export function actorKeyForEvent(event) {
+  return event?.senderKey || event?.senderId || event?.sender || ''
+}
+
+export function actorKeyForProfile(profile) {
+  return profile?.publicKey || profile?.userId || profile?.displayName || profile?.username || ''
+}
+
+export function isOwnEvent(event, profile) {
+  const eventActor = actorKeyForEvent(event)
+  const profileActor = actorKeyForProfile(profile)
+  return !!eventActor && !!profileActor && eventActor === profileActor
+}
+
+export function materializeChatEvents(events, profile = null) {
+  const sorted = [...events].sort((left, right) => {
+    const timeDelta = left.timestamp - right.timestamp
+    if (timeDelta !== 0) return timeDelta
+    return left.localCreatedAt - right.localCreatedAt
+  })
+  const byId = new Map()
+  const deletedIds = new Set()
+  const edits = new Map()
+  const reactions = new Map()
+
+  for (const event of sorted) {
+    if (chatEventTypes().includes(event.type)) {
+      byId.set(event.id, event)
+    }
+  }
+
+  for (const event of sorted) {
+    if (event.type === 'chat-edit') {
+      const target = byId.get(event.payload?.targetId)
+      if (!target || target.type !== 'chat') continue
+      if (actorKeyForEvent(target) !== actorKeyForEvent(event)) continue
+      edits.set(target.id, {
+        editedAt: event.timestamp,
+        text: event.payload.text
+      })
+    }
+
+    if (event.type === 'chat-delete') {
+      const target = byId.get(event.payload?.targetId)
+      if (!target || !chatEventTypes().includes(target.type)) continue
+      if (actorKeyForEvent(target) !== actorKeyForEvent(event)) continue
+      deletedIds.add(target.id)
+    }
+
+    if (event.type === 'chat-reaction') {
+      const target = byId.get(event.payload?.targetId)
+      if (!target || !chatEventTypes().includes(target.type)) continue
+      addChatReaction(reactions, target.id, event)
+    }
+  }
+
+  return sorted
+    .filter((event) => chatEventTypes().includes(event.type) && !deletedIds.has(event.id))
+    .map((event) => {
+      const edit = edits.get(event.id)
+      return {
+        ...event,
+        chatState: {
+          editedAt: edit?.editedAt || null,
+          own: isOwnEvent(event, profile),
+          reactions: chatReactionList(reactions.get(event.id), profile)
+        },
+        payload:
+          event.type === 'chat' && edit
+            ? {
+                ...event.payload,
+                text: edit.text
+              }
+            : event.payload
+      }
+    })
+    .sort((left, right) => {
+      const timeDelta = right.timestamp - left.timestamp
+      if (timeDelta !== 0) return timeDelta
+      return right.localCreatedAt - left.localCreatedAt
+    })
+}
+
+export function timelineEvents(events) {
+  return events.filter((event) => timelineEventTypes().includes(event.type))
+}
+
 export function eventStatus(event, appState) {
   if (appState.offline.pendingEventIds.has(event.id)) return 'pending'
   return ['local', 'remote', 'stored'].includes(event.status) ? event.status : 'local'
@@ -80,16 +175,17 @@ export function eventStatusLabel(event, appState) {
 }
 
 export function roomMetrics(appState) {
-  const playableEvents = appState.events.filter((event) => event.type !== 'system')
+  const chatEvents = materializeChatEvents(appState.events, appState.profile)
+  const playableEvents = timelineEvents(appState.events)
   const pendingEvents = appState.events.filter((event) =>
     appState.offline.pendingEventIds.has(event.id)
   )
 
   return {
-    chats: appState.events.filter((event) => event.type === 'chat').length,
+    chats: chatEvents.filter((event) => event.type === 'chat').length,
     chants: appState.events.filter((event) => event.type === 'chant').length,
     clips: appState.events.filter((event) => event.type === 'clip').length,
-    media: appState.events.filter((event) => event.type === 'chat-media').length,
+    media: chatEvents.filter((event) => event.type === 'chat-media').length,
     pending: Math.max(appState.offline.pendingCount, pendingEvents.length),
     reactions: appState.events.filter((event) => event.type === 'reaction').length,
     saved: appState.events.filter((event) => event.status === 'stored').length,
@@ -100,4 +196,43 @@ export function roomMetrics(appState) {
 
 export function eventListSignature(events) {
   return events.map((event) => `${event.id}:${event.status}:${event.version}`).join('|')
+}
+
+function addChatReaction(reactions, targetId, event) {
+  const emoji = event.payload?.emoji
+  if (!emoji) return
+
+  const targetReactions = reactions.get(targetId) || new Map()
+  const emojiReactions = targetReactions.get(emoji) || new Map()
+  const actor = actorKeyForEvent(event)
+  if (!actor) return
+
+  emojiReactions.set(actor, {
+    actor,
+    name: event.sender || 'Fan',
+    timestamp: event.timestamp
+  })
+  targetReactions.set(emoji, emojiReactions)
+  reactions.set(targetId, targetReactions)
+}
+
+function chatReactionList(targetReactions, profile) {
+  if (!targetReactions) return []
+
+  const profileActor = actorKeyForProfile(profile)
+  return Array.from(targetReactions.entries())
+    .map(([emoji, reactors]) => {
+      const people = Array.from(reactors.values())
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((item) => item.name)
+
+      return {
+        count: people.length,
+        emoji,
+        names: people,
+        reactedByMe: profileActor ? reactors.has(profileActor) : false
+      }
+    })
+    .filter((item) => item.count > 0)
+    .sort((left, right) => right.count - left.count || left.emoji.localeCompare(right.emoji))
 }

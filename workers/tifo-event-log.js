@@ -69,7 +69,21 @@ function decodeEvent(block, roomCode) {
     if (!event || typeof event !== 'object') return null
     if (event.room !== roomCode) return null
     if (typeof event.id !== 'string' || event.id.trim() === '') return null
-    if (!['chat', 'chat-media', 'chant', 'reaction', 'system'].includes(event.type)) return null
+    if (
+      ![
+        'chat',
+        'chat-delete',
+        'chat-edit',
+        'chat-media',
+        'chat-reaction',
+        'chant',
+        'clip',
+        'reaction',
+        'system'
+      ].includes(event.type)
+    ) {
+      return null
+    }
     if (!event.payload || typeof event.payload !== 'object') return null
     return {
       ...event,

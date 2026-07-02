@@ -46,7 +46,7 @@ export function ChantRecorder({ actions, recorder }) {
         onClick={actions.saveFallbackChant}
       >
         <Music2 size={15} strokeWidth={2.4} />
-        Use demo chant
+        Use sample chant
       </button>
       {recorder.error ? (
         <p className='chant-error' role='status'>

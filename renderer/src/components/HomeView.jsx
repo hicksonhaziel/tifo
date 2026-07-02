@@ -1,26 +1,23 @@
-import { RadioTower } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { DoorOpen, KeyRound, RadioTower, Search } from 'lucide-react'
+import { useState } from 'react'
+
+import { profileLabel, shortProfileKey } from '../tifo/identity.js'
+import { availableRooms } from '../tifo/rooms.js'
 
 export function HomeView({ actions, state }) {
-  const [nickname, setNickname] = useState(state.nickname)
-  const [roomCode, setRoomCode] = useState(state.roomCode)
+  const [roomCode, setRoomCode] = useState('')
+  const profile = state.profile
 
-  useEffect(() => {
-    setNickname(state.nickname)
-    setRoomCode(state.roomCode)
-  }, [state.nickname, state.roomCode])
-
-  function submitForm(event) {
+  function submitCustomRoom(event) {
     event.preventDefault()
-    actions.joinRoom({
-      nickname: nickname.trim(),
-      roomCode: roomCode.trim()
-    })
+    const nextRoomCode = roomCode.trim().toUpperCase()
+    if (!nextRoomCode) return
+    actions.joinRoom({ roomCode: nextRoomCode })
   }
 
   return (
     <main className='home-view'>
-      <section className='brand-panel' aria-labelledby='home-title'>
+      <section className='brand-panel home-identity-panel' aria-labelledby='home-title'>
         <div className='brand-lockup'>
           <div>
             <p className='eyebrow'>TIFO Living Terrace</p>
@@ -33,26 +30,33 @@ export function HomeView({ actions, state }) {
             </h1>
           </div>
         </div>
-        <p className='tagline'>Build the terrace. Preserve the echo.</p>
-        <div className='feature-row' aria-label='TIFO principles'>
-          <span>Fan owned</span>
-          <span>No accounts</span>
-          <span>Peer first</span>
+
+        <div className='home-identity'>
+          <span className='identity-avatar'>
+            {profile?.username?.slice(0, 1).toUpperCase() || 'T'}
+          </span>
+          <div>
+            <span className='status-label'>Fan identity</span>
+            <strong>{profileLabel(profile)}</strong>
+            <small>{shortProfileKey(profile)}</small>
+          </div>
         </div>
+
         <div className='status-grid' aria-label='App status'>
           <div>
             <span className='status-label'>Pear worker</span>
             <strong>{state.workerStatus}</strong>
           </div>
           <div>
-            <span className='status-label'>P2P room</span>
-            <strong>Not connected</strong>
+            <span className='status-label'>Rooms</span>
+            <strong>{availableRooms.length} available</strong>
           </div>
           <div>
-            <span className='status-label'>Mode</span>
-            <strong>Local preview</strong>
+            <span className='status-label'>App peers</span>
+            <strong>{state.appPeerCount}</strong>
           </div>
         </div>
+
         {state.lastError ? (
           <p className='error-banner' role='status'>
             {state.lastError}
@@ -60,53 +64,64 @@ export function HomeView({ actions, state }) {
         ) : null}
       </section>
 
-      <section className='join-panel' aria-labelledby='join-title'>
-        <div className='panel-heading'>
-          <p className='eyebrow'>Join room</p>
-          <h2 id='join-title'>Enter a match room</h2>
-          <p className='panel-copy'>Join a worker-backed P2P match room.</p>
+      <section className='rooms-panel' aria-labelledby='rooms-title'>
+        <div className='panel-heading rooms-heading'>
+          <div>
+            <p className='eyebrow'>Match rooms</p>
+            <h2 id='rooms-title'>Available terraces</h2>
+          </div>
+          <span className='local-pill connected'>Ready</span>
         </div>
-        <form id='join-form' className='join-form' onSubmit={submitForm}>
+
+        <div className='room-card-list'>
+          {availableRooms.map((room) => (
+            <button
+              className={`room-card tone-${room.tone}`}
+              key={room.code}
+              type='button'
+              onClick={() => actions.joinRoom({ roomCode: room.code })}
+            >
+              <span className='room-card-meta'>{room.region}</span>
+              <strong>{room.title}</strong>
+              <span className='room-card-score'>
+                <b>{room.home}</b>
+                <em>vs</em>
+                <b>{room.away}</b>
+              </span>
+              <span className='room-card-footer'>
+                {room.detail}
+                <DoorOpen size={15} strokeWidth={2.4} />
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <form className='custom-room-form' onSubmit={submitCustomRoom}>
           <label>
-            <span>Fan name</span>
-            <input
-              id='nickname'
-              name='nickname'
-              maxLength='24'
-              autoComplete='nickname'
-              placeholder='Amina'
-              value={nickname}
-              onChange={(event) => setNickname(event.currentTarget.value)}
-              required
-            />
-          </label>
-          <label>
-            <span>Room code</span>
-            <input
-              id='room-code'
-              name='roomCode'
-              maxLength='32'
-              autoComplete='off'
-              placeholder='MAR-DEMO-R16'
-              value={roomCode}
-              onChange={(event) => setRoomCode(event.currentTarget.value)}
-              required
-            />
+            <span>Private room code</span>
+            <div className='custom-room-input'>
+              <Search size={16} strokeWidth={2.4} />
+              <input
+                autoComplete='off'
+                maxLength='32'
+                placeholder='TEAM-TEAM-ROUND'
+                value={roomCode}
+                onChange={(event) => setRoomCode(event.currentTarget.value.toUpperCase())}
+              />
+            </div>
           </label>
           <button
-            className='primary-action inline-flex items-center justify-center gap-2'
+            className='ghost-action inline-flex items-center justify-center gap-2'
             type='submit'
           >
             <RadioTower size={16} strokeWidth={2.4} />
-            Enter terrace
+            Enter
           </button>
         </form>
-        <div className='fixture-preview'>
-          <span className='fixture-label'>Demo fixture</span>
-          <span className='fixture-team'>MAR</span>
-          <span className='fixture-divider'>vs</span>
-          <span className='fixture-team muted'>OPP</span>
-          <span className='fixture-round'>R16</span>
+
+        <div className='identity-note'>
+          <KeyRound size={15} strokeWidth={2.4} />
+          <span>{profileLabel(profile)} joins every room from this device.</span>
         </div>
       </section>
     </main>

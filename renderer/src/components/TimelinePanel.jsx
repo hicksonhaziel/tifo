@@ -1,6 +1,12 @@
 import { motion } from 'framer-motion'
 
-import { eventMeta, eventStatusLabel, reactionTheme, safeClass } from '../tifo/domain.js'
+import {
+  eventMeta,
+  eventStatusLabel,
+  reactionTheme,
+  safeClass,
+  timelineEvents
+} from '../tifo/domain.js'
 import {
   formatBytes,
   formatClipDuration,
@@ -10,6 +16,8 @@ import {
 } from '../tifo/format.js'
 
 export function TimelinePanel({ actions, derived, state }) {
+  const events = timelineEvents(state.events)
+
   return (
     <section className='timeline-surface' aria-labelledby='timeline-title'>
       <div className='section-heading'>
@@ -19,11 +27,11 @@ export function TimelinePanel({ actions, derived, state }) {
             {derived.metrics.peerEvents} peer events, {derived.metrics.saved} saved
           </p>
         </div>
-        <span className='timeline-count'>{state.events.length} events</span>
+        <span className='timeline-count'>{events.length} events</span>
       </div>
       <ol className='timeline-list'>
-        {state.events.length > 0 ? (
-          state.events.map((event) => (
+        {events.length > 0 ? (
+          events.map((event) => (
             <TimelineEvent
               actions={actions}
               derived={derived}
@@ -34,7 +42,7 @@ export function TimelinePanel({ actions, derived, state }) {
           ))
         ) : (
           <li className='empty-state'>
-            The terrace is quiet. First messages and flares will appear here.
+            The Echo timeline is quiet. Clips, chants, and flares will appear here.
           </li>
         )}
       </ol>

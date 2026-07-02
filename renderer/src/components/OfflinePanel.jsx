@@ -1,6 +1,6 @@
 export function OfflinePanel({ actions, metrics, offline, peerCount }) {
   const modeLabel = offline.enabled
-    ? 'Offline simulation'
+    ? 'Offline mode'
     : metrics.pending > 0
       ? 'Reconnect pending'
       : 'Network sync'
@@ -19,7 +19,7 @@ export function OfflinePanel({ actions, metrics, offline, peerCount }) {
       aria-label='Offline reconnect status'
     >
       <div className='offline-demo-copy'>
-        <span className='status-label'>Reconnect demo</span>
+        <span className='status-label'>Reconnect mode</span>
         <strong>{modeLabel}</strong>
         <p>{offline.detail}</p>
       </div>

@@ -25,12 +25,16 @@ export function replayIdleState() {
   }
 }
 
-export function createInitialState() {
+export function createInitialState(options = {}) {
+  const profile = options.profile || null
+
   return {
-    view: 'home',
-    nickname: '',
-    roomCode: 'MAR-DEMO-R16',
+    view: profile ? 'home' : 'welcome',
+    profile,
+    nickname: profile?.displayName || profile?.username || '',
+    roomCode: '',
     roomTitle: '',
+    appPeerCount: 0,
     workerStatus: 'starting',
     syncStatus: 'Waiting for worker',
     peerCount: 0,

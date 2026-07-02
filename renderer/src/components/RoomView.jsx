@@ -1,6 +1,7 @@
 import { LogOut } from 'lucide-react'
 
 import { eventMeta, reactionTheme, roomParts, safeClass } from '../tifo/domain.js'
+import { profileLabel } from '../tifo/identity.js'
 import { OfflinePanel } from './OfflinePanel.jsx'
 import { ReactionEffects } from './ReactionEffects.jsx'
 import { ReplayPreview } from './ReplayPreview.jsx'
@@ -42,7 +43,7 @@ export function RoomView({ controller }) {
             className={`live-badge ${offlineActive ? 'offline' : connected ? 'connected' : ''}`}
           >
             <span aria-hidden='true'></span>
-            {offlineActive ? 'Offline demo' : connected ? 'P2P live' : 'Seeking peers'}
+            {offlineActive ? 'Offline mode' : connected ? 'P2P live' : 'Seeking peers'}
           </span>
           <button
             className='ghost-action inline-flex items-center justify-center gap-2'
@@ -91,7 +92,7 @@ export function RoomView({ controller }) {
       <section className='match-strip' aria-label='Room status'>
         <div>
           <span className='status-label'>Fan</span>
-          <strong>{state.nickname}</strong>
+          <strong>{profileLabel(state.profile)}</strong>
         </div>
         <div>
           <span className='status-label'>Peers live</span>

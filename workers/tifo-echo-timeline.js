@@ -4,7 +4,7 @@ const crypto = require('hypercore-crypto')
 
 class TifoEchoTimeline {
   constructor(store) {
-    this.store = store.namespace('tifo-echo')
+    this.rootStore = store
     this.base = null
     this.metaCore = null
     this.roomCode = null
@@ -30,7 +30,7 @@ class TifoEchoTimeline {
   }
 
   async openRoomMeta() {
-    this.metaCore = this.store.get({
+    this.metaCore = this.echoStore().get({
       name: roomMetaName(this.roomCode),
       valueEncoding: 'json'
     })
@@ -70,6 +70,7 @@ class TifoEchoTimeline {
 
   async openBase(bootstrapKey) {
     const bootstrapKeyHex = normalizeKeyHex(bootstrapKey)
+    const echoStore = this.echoStore()
     const baseOptions = {
       ackInterval: 1000,
       valueEncoding: 'json',
@@ -78,13 +79,13 @@ class TifoEchoTimeline {
     }
 
     if (bootstrapKeyHex) {
-      baseOptions.keyPair = this.store.createKeyPair(
+      baseOptions.keyPair = await echoStore.createKeyPair(
         `writer:${this.roomCode.trim().toUpperCase()}:${bootstrapKeyHex}`
       )
     }
 
     this.base = new Autobase(
-      this.store.namespace(roomNamespace(this.roomCode)),
+      echoStore.namespace(roomNamespace(this.roomCode)),
       normalizeKey(bootstrapKeyHex),
       baseOptions
     )
@@ -188,6 +189,10 @@ class TifoEchoTimeline {
 
   queueRecord(record) {
     this.pendingRecords.push(record)
+  }
+
+  echoStore() {
+    return this.rootStore.namespace('tifo-echo')
   }
 
   flushPendingRecords() {
@@ -309,7 +314,19 @@ function decodeEchoEvent(record, roomCode) {
   if (!record || typeof record !== 'object') return null
   if (record.room !== roomCode) return null
   if (typeof record.id !== 'string' || record.id.trim() === '') return null
-  if (!['chat', 'chat-media', 'chant', 'clip', 'reaction', 'system'].includes(record.type)) {
+  if (
+    ![
+      'chat',
+      'chat-delete',
+      'chat-edit',
+      'chat-media',
+      'chat-reaction',
+      'chant',
+      'clip',
+      'reaction',
+      'system'
+    ].includes(record.type)
+  ) {
     return null
   }
   if (!record.payload || typeof record.payload !== 'object') return null

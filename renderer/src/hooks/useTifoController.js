@@ -36,7 +36,8 @@ import {
   eventMeta,
   eventStatus,
   reactionTheme,
-  roomMetrics
+  roomMetrics,
+  timelineEventTypes
 } from '../tifo/domain.js'
 import {
   imageFileSupported,
@@ -45,12 +46,22 @@ import {
   mediaRefForFile,
   readImageDimensions
 } from '../tifo/media.js'
+import {
+  createLocalProfile,
+  loadLocalProfile,
+  profileName,
+  saveLocalProfile
+} from '../tifo/identity.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
 
 export function useTifoController() {
-  const [appState, setReactState] = useState(() => createInitialState())
+  const [appState, setReactState] = useState(() =>
+    createInitialState({
+      profile: loadLocalProfile()
+    })
+  )
   const stateRef = useRef(appState)
   const decoderRef = useRef(new TextDecoder('utf-8'))
   const workerClientRef = useRef(null)
@@ -439,6 +450,9 @@ export function useTifoController() {
       case 'app:ready':
         setAppState((state) => ({
           ...state,
+          appPeerCount: Number.isFinite(message.appPeerCount)
+            ? message.appPeerCount
+            : state.appPeerCount,
           workerStatus: message.workerStatus || 'ready',
           syncStatus: message.syncStatus || 'Worker ready',
           lastError: ''
@@ -451,11 +465,18 @@ export function useTifoController() {
           syncStatus: message.syncStatus || 'Worker stopped'
         }))
         break
+      case 'app-peer:count':
+        setAppState((state) => ({
+          ...state,
+          appPeerCount: Number.isFinite(message.count) ? message.count : state.appPeerCount
+        }))
+        break
       case 'room:joined':
         setAppState((state) => ({
           ...state,
           view: 'room',
-          nickname: message.profile.nickname,
+          profile: message.profile || state.profile,
+          nickname: profileName(message.profile || state.profile),
           roomCode: message.room.code,
           roomTitle: message.room.title,
           peerCount: message.peerCount,
@@ -498,7 +519,7 @@ export function useTifoController() {
       case 'room:left':
         setAppState((state) => ({
           ...state,
-          view: 'home',
+          view: state.profile ? 'home' : 'welcome',
           roomTitle: '',
           peerCount: 0,
           syncStatus: message.syncStatus || 'Worker ready',
@@ -676,7 +697,7 @@ export function useTifoController() {
         ...state,
         chantRecorder: {
           elapsedMs: 0,
-          error: err.message || 'Could not save demo chant',
+          error: err.message || 'Could not save sample chant',
           status: 'error'
         }
       }))
@@ -1302,7 +1323,7 @@ export function useTifoController() {
 
   function replayEventsChronological() {
     return stateRef.current.events
-      .filter((event) => event.type !== 'system')
+      .filter((event) => timelineEventTypes().includes(event.type))
       .slice()
       .sort((left, right) => left.timestamp - right.timestamp)
   }
@@ -1452,7 +1473,7 @@ export function useTifoController() {
     if (!session) {
       setAppState((state) => ({
         ...state,
-        lastError: 'Add a goal, reaction, chat, clip, or chant before replaying Echo'
+        lastError: 'Add a flare, clip, or chant before replaying Echo'
       }))
       return
     }
@@ -1568,7 +1589,7 @@ export function useTifoController() {
           ...state,
           replayPreview: {
             ...state.replayPreview,
-            error: 'Replay audio fell back to demo chant'
+            error: 'Replay audio fell back to sample chant'
           }
         }))
         return playAudioUrl(getFallbackChantUrl())
@@ -1596,12 +1617,42 @@ export function useTifoController() {
     }))
   }
 
-  function joinRoom({ nickname, roomCode }) {
-    if (!nickname || !roomCode) return
+  function createProfile(input) {
+    try {
+      const profile = createLocalProfile(input)
+      saveLocalProfile(profile)
+      setAppState((state) => ({
+        ...state,
+        lastError: '',
+        nickname: profileName(profile),
+        profile,
+        view: 'home'
+      }))
+      sendWorkerCommand('profile:set', { profile })
+    } catch (err) {
+      setAppState((state) => ({
+        ...state,
+        lastError: err.message || 'Could not create profile'
+      }))
+    }
+  }
 
-    sendWorkerCommand('profile:set', { nickname })
+  function joinRoom({ roomCode }) {
+    const profile = stateRef.current.profile
+    if (!profile) {
+      setAppState((state) => ({
+        ...state,
+        lastError: 'Create your fan identity before entering a room',
+        view: 'welcome'
+      }))
+      return
+    }
+
+    if (!roomCode) return
+
+    sendWorkerCommand('profile:set', { profile })
     sendWorkerCommand('room:join', {
-      nickname,
+      profile,
       roomCode
     })
   }
@@ -1618,6 +1669,29 @@ export function useTifoController() {
       chatDraft: ''
     }))
     sendWorkerCommand('chat:send', { text: clean })
+  }
+
+  function editChatMessage(targetId, text) {
+    const clean = text.trim()
+    if (!targetId || !clean) return
+    sendWorkerCommand('chat:edit', {
+      targetId,
+      text: clean
+    })
+  }
+
+  function deleteChatEvent(targetId) {
+    if (!targetId) return
+    sendWorkerCommand('chat:delete', { targetId })
+  }
+
+  function reactToChatEvent(targetId, emoji) {
+    const cleanEmoji = String(emoji || '').trim()
+    if (!targetId || !cleanEmoji) return
+    sendWorkerCommand('chat:react', {
+      emoji: cleanEmoji,
+      targetId
+    })
   }
 
   function setChatDraft(value) {
@@ -1685,12 +1759,16 @@ export function useTifoController() {
 
   return {
     actions: {
+      createProfile,
+      deleteChatEvent,
+      editChatMessage,
       joinRoom,
       leaveRoom,
       loadChantAudio,
       loadChatMedia,
       loadClipVideo,
       replayFrom,
+      reactToChatEvent,
       resetReplayPreview,
       saveChatImage,
       saveClipMetadata,

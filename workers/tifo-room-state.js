@@ -15,9 +15,7 @@ function createTifoRoomState(options = {}) {
   }
 
   const state = {
-    profile: {
-      nickname: ''
-    },
+    profile: emptyProfile(),
     room: null,
     events: [],
     seenEventIds: new Set()
@@ -29,12 +27,28 @@ function createTifoRoomState(options = {}) {
     return roomCode.trim().replace(/-/g, ' ').replace(/\s+/g, ' ').toUpperCase()
   }
 
+  function emptyProfile() {
+    return {
+      displayName: '',
+      nickname: '',
+      publicKey: '',
+      userId: '',
+      username: ''
+    }
+  }
+
+  function profileDisplayName(profile = state.profile) {
+    return profile.displayName || profile.username || profile.nickname || 'Local fan'
+  }
+
   function createEvent(type, payload) {
     const createdAt = now()
     return {
       id: `${createdAt.toString(36)}-${random().toString(36).slice(2)}`,
       type,
-      sender: state.profile.nickname || 'Local fan',
+      sender: profileDisplayName(),
+      senderId: state.profile.userId || null,
+      senderKey: state.profile.publicKey || null,
       timestamp: createdAt,
       room: state.room?.code || null,
       payload,
@@ -75,19 +89,98 @@ function createTifoRoomState(options = {}) {
     return false
   }
 
-  function handleProfileSet(command) {
-    const nickname = requireString(command.type, command.nickname, 'nickname')
-    if (!nickname) return
+  function cleanUsername(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^@+/, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '')
+      .slice(0, 20)
+  }
 
-    state.profile.nickname = nickname.slice(0, 24)
+  function cleanDisplayName(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_]/g, '')
+      .slice(0, 24)
+  }
+
+  function cleanPublicKey(value) {
+    const key = typeof value === 'string' ? value.trim().toLowerCase() : ''
+    return /^[0-9a-f]{64}$/.test(key) ? key : ''
+  }
+
+  function cleanUserId(value) {
+    const userId = typeof value === 'string' ? value.trim() : ''
+    return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
+  }
+
+  function actorKeyForEvent(event) {
+    return event?.senderKey || event?.senderId || event?.sender || ''
+  }
+
+  function actorKeyForProfile(profile) {
+    return profile?.publicKey || profile?.userId || profileDisplayName(profile)
+  }
+
+  function sameActor(event, profile) {
+    const eventActor = actorKeyForEvent(event)
+    const profileActor = actorKeyForProfile(profile)
+    return !!eventActor && !!profileActor && eventActor === profileActor
+  }
+
+  function sanitizeEmoji(value) {
+    const emoji = typeof value === 'string' ? value.trim() : ''
+    if (!emoji || emoji.length > 16) return ''
+    if (/[\u0000-\u001f\u007f]/.test(emoji)) return ''
+    return emoji
+  }
+
+  function sanitizeProfile(command) {
+    const source =
+      command.profile && typeof command.profile === 'object' ? command.profile : command || {}
+
+    const fallbackName =
+      typeof command.nickname === 'string'
+        ? command.nickname
+        : typeof source.nickname === 'string'
+          ? source.nickname
+          : ''
+
+    const username = cleanUsername(source.username || fallbackName)
+    const displayName = cleanDisplayName(source.displayName || fallbackName || username)
+    if (!displayName) return null
+
+    return {
+      displayName,
+      nickname: displayName,
+      publicKey: cleanPublicKey(source.publicKey),
+      userId: cleanUserId(source.userId),
+      username
+    }
+  }
+
+  function handleProfileSet(command) {
+    const profile = sanitizeProfile(command)
+    if (!profile) {
+      sendError(command.type, 'profile is required')
+      return
+    }
+
+    state.profile = profile
   }
 
   async function handleRoomJoin(command) {
-    const nickname = requireString(command.type, command.nickname, 'nickname')
+    const profile = sanitizeProfile(command)
     const roomCode = requireString(command.type, command.roomCode, 'roomCode')
-    if (!nickname || !roomCode) return
+    if (!profile || !roomCode) {
+      if (!profile) sendError(command.type, 'profile is required')
+      return
+    }
 
-    state.profile.nickname = nickname.slice(0, 24)
+    state.profile = profile
     state.room = {
       code: roomCode.slice(0, 32),
       title: roomTitle(roomCode)
@@ -99,7 +192,7 @@ function createTifoRoomState(options = {}) {
     mergeStoredEvents(storedEvents, { notify: false })
 
     const event = createEvent('system', {
-      text: `${state.profile.nickname} entered ${state.room.title}`
+      text: `${profileDisplayName()} entered ${state.room.title}`
     })
     state.seenEventIds.add(event.id)
     state.events.unshift(event)
@@ -136,6 +229,74 @@ function createTifoRoomState(options = {}) {
 
     addEvent('chat', {
       text: text.slice(0, 180)
+    })
+  }
+
+  function handleChatEdit(command) {
+    if (!requireRoom(command.type)) return
+
+    const targetId = requireString(command.type, command.targetId, 'targetId')
+    const text = requireString(command.type, command.text, 'text')
+    if (!targetId || !text) return
+
+    const target = state.events.find((event) => event.id === targetId)
+    if (!target || target.type !== 'chat') {
+      sendError(command.type, 'Message was not found')
+      return
+    }
+
+    if (!sameActor(target, state.profile)) {
+      sendError(command.type, 'Only the sender can edit this message')
+      return
+    }
+
+    addEvent('chat-edit', {
+      targetId: targetId.slice(0, 96),
+      text: text.slice(0, 180)
+    })
+  }
+
+  function handleChatDelete(command) {
+    if (!requireRoom(command.type)) return
+
+    const targetId = requireString(command.type, command.targetId, 'targetId')
+    if (!targetId) return
+
+    const target = state.events.find((event) => event.id === targetId)
+    if (!target || !['chat', 'chat-media'].includes(target.type)) {
+      sendError(command.type, 'Message was not found')
+      return
+    }
+
+    if (!sameActor(target, state.profile)) {
+      sendError(command.type, 'Only the sender can delete this message')
+      return
+    }
+
+    addEvent('chat-delete', {
+      targetId: targetId.slice(0, 96)
+    })
+  }
+
+  function handleChatReaction(command) {
+    if (!requireRoom(command.type)) return
+
+    const targetId = requireString(command.type, command.targetId, 'targetId')
+    const emoji = sanitizeEmoji(command.emoji)
+    if (!targetId || !emoji) {
+      sendError(command.type, 'emoji reaction is required')
+      return
+    }
+
+    const target = state.events.find((event) => event.id === targetId)
+    if (!target || !['chat', 'chat-media'].includes(target.type)) {
+      sendError(command.type, 'Message was not found')
+      return
+    }
+
+    addEvent('chat-reaction', {
+      emoji,
+      targetId: targetId.slice(0, 96)
     })
   }
 
@@ -248,6 +409,15 @@ function createTifoRoomState(options = {}) {
       case 'chat:send':
         handleChatSend(command)
         break
+      case 'chat:edit':
+        handleChatEdit(command)
+        break
+      case 'chat:delete':
+        handleChatDelete(command)
+        break
+      case 'chat:react':
+        handleChatReaction(command)
+        break
       case 'reaction:send':
         handleReactionSend(command)
         break
@@ -276,6 +446,32 @@ function createTifoRoomState(options = {}) {
       if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
       return {
         text: payload.text.trim().slice(0, 180)
+      }
+    }
+
+    if (event.type === 'chat-edit') {
+      if (typeof payload.targetId !== 'string' || payload.targetId.trim() === '') return null
+      if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
+      return {
+        targetId: payload.targetId.trim().slice(0, 96),
+        text: payload.text.trim().slice(0, 180)
+      }
+    }
+
+    if (event.type === 'chat-delete') {
+      if (typeof payload.targetId !== 'string' || payload.targetId.trim() === '') return null
+      return {
+        targetId: payload.targetId.trim().slice(0, 96)
+      }
+    }
+
+    if (event.type === 'chat-reaction') {
+      if (typeof payload.targetId !== 'string' || payload.targetId.trim() === '') return null
+      const emoji = sanitizeEmoji(payload.emoji)
+      if (!emoji) return null
+      return {
+        emoji,
+        targetId: payload.targetId.trim().slice(0, 96)
       }
     }
 
@@ -412,6 +608,8 @@ function createTifoRoomState(options = {}) {
       id: event.id.slice(0, 96),
       type: event.type,
       sender: sender.slice(0, 24),
+      senderId: cleanUserId(event.senderId),
+      senderKey: cleanPublicKey(event.senderKey),
       timestamp,
       room: state.room.code,
       payload,
@@ -482,6 +680,8 @@ function createTifoRoomState(options = {}) {
         typeof event.sender === 'string' && event.sender.trim()
           ? event.sender.trim().slice(0, 24)
           : 'Stored fan',
+      senderId: cleanUserId(event.senderId),
+      senderKey: cleanPublicKey(event.senderKey),
       timestamp: Number.isFinite(event.timestamp) ? event.timestamp : now(),
       room: state.room.code,
       payload,
@@ -504,6 +704,8 @@ function createTifoRoomState(options = {}) {
       event.id,
       event.type,
       event.sender,
+      event.senderId,
+      event.senderKey,
       event.timestamp,
       event.status,
       event.version,
