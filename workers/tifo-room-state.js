@@ -301,18 +301,36 @@ function createTifoRoomState(options = {}) {
     if (!Array.isArray(events)) return []
 
     const added = []
+    let changed = false
     for (const event of events) {
       const cleanEvent = cleanStoredEvent(event)
-      if (!cleanEvent || state.seenEventIds.has(cleanEvent.id)) continue
+      if (!cleanEvent) continue
+
+      const existingIndex = state.events.findIndex((item) => item.id === cleanEvent.id)
+      if (existingIndex >= 0) {
+        const previous = state.events[existingIndex]
+        const next = {
+          ...previous,
+          ...cleanEvent
+        }
+        if (eventListEntrySignature(previous) !== eventListEntrySignature(next)) {
+          state.events[existingIndex] = next
+          changed = true
+        }
+        state.seenEventIds.add(cleanEvent.id)
+        continue
+      }
+
+      if (state.seenEventIds.has(cleanEvent.id)) continue
       state.seenEventIds.add(cleanEvent.id)
       state.events.unshift(cleanEvent)
       added.push(cleanEvent)
     }
 
-    if (added.length > 0 && opts.notify !== false) {
+    if ((added.length > 0 || changed) && opts.notify !== false) {
       state.events = sortedEvents()
       send('event:list', { events: state.events })
-    } else if (added.length > 0) {
+    } else if (added.length > 0 || changed) {
       state.events = sortedEvents()
     }
 
@@ -349,6 +367,18 @@ function createTifoRoomState(options = {}) {
       if (timeDelta !== 0) return timeDelta
       return right.localCreatedAt - left.localCreatedAt
     })
+  }
+
+  function eventListEntrySignature(event) {
+    return [
+      event.id,
+      event.type,
+      event.sender,
+      event.timestamp,
+      event.status,
+      event.version,
+      JSON.stringify(event.payload)
+    ].join(':')
   }
 
   return {

@@ -56,6 +56,10 @@ const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
 const pendingChantRequests = new Map()
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
+const pendingSyncEventIds = new Set()
+const inflightSyncEventIds = new Set()
+let simulatedOffline = false
+let lastPendingFlushCount = 0
 
 const roomState = createTifoRoomState({
   send,
@@ -115,8 +119,53 @@ function chantRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+function pendingSyncEvents() {
+  return roomState.state.events.filter((event) => pendingSyncEventIds.has(event.id))
+}
+
+function offlineStateDetail() {
+  const pendingCount = pendingSyncEventIds.size
+  if (simulatedOffline) {
+    return pendingCount === 0
+      ? 'Local room active'
+      : `${pendingCount} local event${pendingCount === 1 ? '' : 's'} queued`
+  }
+
+  if (pendingCount > 0) {
+    return roomPeers.size === 0
+      ? `Waiting for peers to sync ${pendingCount} event${pendingCount === 1 ? '' : 's'}`
+      : `Syncing ${pendingCount} pending event${pendingCount === 1 ? '' : 's'}`
+  }
+
+  if (lastPendingFlushCount > 0) {
+    return `${lastPendingFlushCount} event${lastPendingFlushCount === 1 ? '' : 's'} synced after reconnect`
+  }
+
+  return roomPeers.size === 0 ? 'Network searching' : 'Network live'
+}
+
+function sendOfflineState(payload = {}) {
+  send('offline:state', {
+    detail: offlineStateDetail(),
+    enabled: simulatedOffline,
+    lastFlushCount: lastPendingFlushCount,
+    pendingCount: pendingSyncEventIds.size,
+    pendingEventIds: Array.from(pendingSyncEventIds),
+    peerCount: roomPeers.size,
+    ...payload
+  })
+}
+
+function queuePendingSync(event) {
+  if (!event?.id) return
+  pendingSyncEventIds.add(event.id)
+  inflightSyncEventIds.delete(event.id)
+  lastPendingFlushCount = 0
+  sendOfflineState()
+}
+
 function sendPeer(peer, message) {
-  if (peer.closed || !peer.controlMessage) return
+  if (simulatedOffline || peer.closed || !peer.controlMessage) return
   peer.controlMessage.send({
     room: roomState.state.room?.code || null,
     ...message
@@ -148,6 +197,10 @@ function nudgePeersToRefresh() {
 
 function broadcastRoomEvent(event, exceptPeerId = null) {
   if (!roomState.state.room) return
+  if (simulatedOffline) {
+    queuePendingSync(event)
+    return
+  }
 
   for (const peer of roomPeers.values()) {
     if (peer.id === exceptPeerId) continue
@@ -185,10 +238,22 @@ function updateRoomPeerStatus() {
   send('peer:count', { count })
 
   if (!roomState.state.room) return
+  if (simulatedOffline) {
+    send('sync:status', {
+      status:
+        pendingSyncEventIds.size === 0
+          ? 'Offline demo: local only'
+          : `Offline demo: ${pendingSyncEventIds.size} pending`
+    })
+    sendOfflineState()
+    return
+  }
+
   send('sync:status', {
     status:
       count === 0 ? 'Searching for peers' : `P2P connected: ${count} peer${count === 1 ? '' : 's'}`
   })
+  flushPendingSyncEvents()
 }
 
 function startEchoRefresh() {
@@ -231,17 +296,33 @@ async function handleJoinRoom(room) {
     onUpdate: handleEchoTimelineUpdate
   })
   const migratedEvents = await migrateLegacyRoomEvents(room, storedEvents)
-  joinRoomNetwork(room)
+  if (simulatedOffline) {
+    send('sync:status', { status: 'Offline demo: local only' })
+    sendOfflineState()
+  } else {
+    joinRoomNetwork(room)
+  }
   return migratedEvents
 }
 
 async function handleLeaveRoom() {
   leaveRoomNetwork()
+  simulatedOffline = false
+  pendingSyncEventIds.clear()
+  inflightSyncEventIds.clear()
+  lastPendingFlushCount = 0
+  sendOfflineState()
   await echoTimeline.closeRoom()
 }
 
 function handleLocalEvent(event) {
   persistEvent(event)
+
+  if (simulatedOffline || roomPeers.size === 0) {
+    queuePendingSync(event)
+    return
+  }
+
   broadcastRoomEvent(event)
 }
 
@@ -251,6 +332,100 @@ function handleRemoteEvent(event) {
 
 function handleEchoTimelineUpdate(events) {
   roomState.mergeStoredEvents(events)
+}
+
+function flushPendingSyncEvents() {
+  if (simulatedOffline || !roomState.state.room) {
+    sendOfflineState()
+    return 0
+  }
+
+  if (pendingSyncEventIds.size === 0) return 0
+
+  if (roomPeers.size === 0) {
+    sendOfflineState()
+    return 0
+  }
+
+  let flushedCount = 0
+  for (const event of pendingSyncEvents().reverse()) {
+    if (inflightSyncEventIds.has(event.id)) continue
+    broadcastRoomEvent(event)
+    inflightSyncEventIds.add(event.id)
+    flushedCount += 1
+  }
+
+  for (const eventId of Array.from(pendingSyncEventIds)) {
+    if (!roomState.state.seenEventIds.has(eventId)) {
+      pendingSyncEventIds.delete(eventId)
+      inflightSyncEventIds.delete(eventId)
+    }
+  }
+
+  if (flushedCount > 0) {
+    nudgePeersToRefresh()
+    send('sync:status', {
+      status: `Reconnected: sending ${flushedCount} event${flushedCount === 1 ? '' : 's'}`
+    })
+  }
+
+  sendOfflineState()
+  return flushedCount
+}
+
+function acknowledgePendingSync(eventId) {
+  const cleanEventId = typeof eventId === 'string' ? eventId.slice(0, 96) : ''
+  if (!pendingSyncEventIds.has(cleanEventId)) return
+
+  pendingSyncEventIds.delete(cleanEventId)
+  inflightSyncEventIds.delete(cleanEventId)
+  lastPendingFlushCount += 1
+
+  if (pendingSyncEventIds.size === 0) {
+    send('sync:status', {
+      status: `Reconnected: synced ${lastPendingFlushCount} event${lastPendingFlushCount === 1 ? '' : 's'}`
+    })
+  } else {
+    send('sync:status', {
+      status: `Reconnected: ${pendingSyncEventIds.size} pending`
+    })
+  }
+
+  sendOfflineState()
+}
+
+async function setSimulatedOffline(enabled) {
+  const nextOffline = enabled === true
+  if (simulatedOffline === nextOffline) {
+    sendOfflineState()
+    return
+  }
+
+  const room = roomState.state.room
+  simulatedOffline = nextOffline
+  lastPendingFlushCount = 0
+
+  if (simulatedOffline) {
+    leaveRoomNetwork()
+    send('sync:status', {
+      status:
+        pendingSyncEventIds.size === 0
+          ? 'Offline demo: local only'
+          : `Offline demo: ${pendingSyncEventIds.size} pending`
+    })
+    sendOfflineState()
+    return
+  }
+
+  if (room) {
+    joinRoomNetwork(room)
+    await echoTimeline.refresh()
+    flushPendingSyncEvents()
+  } else {
+    send('sync:status', { status: 'Worker ready' })
+  }
+
+  sendOfflineState()
 }
 
 async function migrateLegacyRoomEvents(room, storedEvents) {
@@ -488,6 +663,7 @@ async function handlePeerChantData(message) {
 
 async function handlePeerMessage(peer, message) {
   const room = roomState.state.room
+  if (simulatedOffline) return
   if (!room || !message || typeof message !== 'object' || message.room !== room.code) return
 
   if (message.type === 'identity') {
@@ -506,8 +682,20 @@ async function handlePeerMessage(peer, message) {
   }
 
   if (message.type === 'event:announce') {
+    const eventId = typeof message.event?.id === 'string' ? message.event.id.slice(0, 96) : ''
     const addedEvent = roomState.addRemoteEvent(message.event)
+    if (eventId) {
+      sendPeer(peer, {
+        type: 'event:ack',
+        eventId
+      })
+    }
     if (addedEvent) broadcastRoomEvent(addedEvent, peer.id)
+  }
+
+  if (message.type === 'event:ack') {
+    acknowledgePendingSync(message.eventId)
+    return
   }
 
   if (message.type === 'chant:request') {
@@ -555,13 +743,14 @@ function closeRoomPeer(peer) {
   if (peer.closed) return
   peer.closed = true
   roomPeers.delete(peer.id)
+  inflightSyncEventIds.clear()
   if (peer.channel) peer.channel.close()
   peer.connection.destroy()
   updateRoomPeerStatus()
 }
 
 function handleRoomConnection(connection, peerInfo) {
-  if (!roomState.state.room) {
+  if (simulatedOffline || !roomState.state.room) {
     connection.destroy()
     return
   }
@@ -589,6 +778,7 @@ function handleRoomConnection(connection, peerInfo) {
     id: roomTopic,
     onopen() {
       sendPeerSnapshot(peer)
+      flushPendingSyncEvents()
     },
     onclose() {
       closeRoomPeer(peer)
@@ -622,6 +812,12 @@ function handleRoomConnection(connection, peerInfo) {
 
 function joinRoomNetwork(room) {
   leaveRoomNetwork()
+  if (simulatedOffline) {
+    send('sync:status', { status: 'Offline demo: local only' })
+    sendOfflineState()
+    return
+  }
+
   startEchoRefresh()
 
   roomTopic = topicForRoom(room.code)
@@ -638,6 +834,7 @@ function joinRoomNetwork(room) {
       if (roomState.state.room?.code === room.code && roomPeers.size === 0) {
         send('sync:status', { status: 'Searching for peers' })
       }
+      flushPendingSyncEvents()
     })
     .catch((err) => {
       send('error', {
@@ -708,6 +905,11 @@ pipe.on('data', async (data) => {
   }
 
   try {
+    if (command.type === 'offline:set') {
+      await setSimulatedOffline(command.enabled)
+      return
+    }
+
     if (command.type === 'chant:load') {
       await handleChantLoad(command)
       return

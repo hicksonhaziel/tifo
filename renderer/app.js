@@ -15,6 +15,13 @@ const state = {
   peerCount: 0,
   events: [],
   chatDraft: '',
+  offline: {
+    detail: 'Network searching',
+    enabled: false,
+    lastFlushCount: 0,
+    pendingCount: 0,
+    pendingEventIds: new Set()
+  },
   chantRecorder: {
     elapsedMs: 0,
     error: '',
@@ -147,21 +154,25 @@ function eventMeta(event) {
 }
 
 function eventStatus(event) {
+  if (state.offline.pendingEventIds.has(event.id)) return 'pending'
   return ['local', 'remote', 'stored'].includes(event.status) ? event.status : 'local'
 }
 
 function eventStatusLabel(event) {
   const status = eventStatus(event)
+  if (status === 'pending') return 'Pending'
   if (status === 'remote') return 'Peer'
-  if (status === 'stored') return 'Saved'
+  if (status === 'stored') return 'Synced'
   return 'Local'
 }
 
 function roomMetrics() {
   const playableEvents = state.events.filter((event) => event.type !== 'system')
+  const pendingEvents = state.events.filter((event) => state.offline.pendingEventIds.has(event.id))
   return {
     chats: state.events.filter((event) => event.type === 'chat').length,
     chants: state.events.filter((event) => event.type === 'chant').length,
+    pending: Math.max(state.offline.pendingCount, pendingEvents.length),
     reactions: state.events.filter((event) => event.type === 'reaction').length,
     saved: state.events.filter((event) => event.status === 'stored').length,
     peerEvents: state.events.filter((event) => event.status === 'remote').length,
@@ -325,6 +336,13 @@ function applyWorkerMessage(message) {
       state.syncStatus = message.syncStatus
       state.events = message.events || []
       state.chatDraft = ''
+      state.offline = {
+        detail: 'Network searching',
+        enabled: false,
+        lastFlushCount: 0,
+        pendingCount: 0,
+        pendingEventIds: new Set()
+      }
       state.chantRecorder = {
         elapsedMs: 0,
         error: '',
@@ -345,6 +363,13 @@ function applyWorkerMessage(message) {
       state.syncStatus = message.syncStatus || 'Worker ready'
       state.events = message.events || []
       state.chatDraft = ''
+      state.offline = {
+        detail: 'Network searching',
+        enabled: false,
+        lastFlushCount: 0,
+        pendingCount: 0,
+        pendingEventIds: new Set()
+      }
       stopChantRecording({ discard: true })
       resetReplayPreview()
       state.chantRecorder = {
@@ -365,6 +390,20 @@ function applyWorkerMessage(message) {
     case 'sync:status':
       shouldRender = state.syncStatus !== message.status
       state.syncStatus = message.status
+      break
+    case 'offline:state':
+      {
+        const pendingEventIds = Array.isArray(message.pendingEventIds)
+          ? message.pendingEventIds.filter((id) => typeof id === 'string')
+          : []
+        state.offline = {
+          detail: message.detail || (message.enabled ? 'Local room active' : 'Network live'),
+          enabled: message.enabled === true,
+          lastFlushCount: Number.isFinite(message.lastFlushCount) ? message.lastFlushCount : 0,
+          pendingCount: Number.isFinite(message.pendingCount) ? message.pendingCount : 0,
+          pendingEventIds: new Set(pendingEventIds)
+        }
+      }
       break
     case 'event:added':
       triggerReactionEffect(message.event)
@@ -1072,8 +1111,15 @@ function renderRoom() {
   const hasEvents = metrics.playableEvents.length > 0
   const match = roomParts(state.roomCode)
   const latestEvent = metrics.playableEvents[0]
-  const connected = state.peerCount > 0
-  const syncTone = state.lastError ? 'error' : connected ? 'connected' : 'searching'
+  const offlineActive = state.offline.enabled
+  const connected = !offlineActive && state.peerCount > 0
+  const syncTone = offlineActive
+    ? 'offline'
+    : state.lastError
+      ? 'error'
+      : connected
+        ? 'connected'
+        : 'searching'
   const activeEffect = state.effects[0]
   const timeline = state.events
     .map((event) => {
@@ -1132,9 +1178,9 @@ function renderRoom() {
           </div>
         </div>
         <div class="room-actions">
-          <span class="live-badge ${connected ? 'connected' : ''}">
+          <span class="live-badge ${offlineActive ? 'offline' : connected ? 'connected' : ''}">
             <span aria-hidden="true"></span>
-            ${escapeHtml(connected ? 'P2P live' : 'Seeking peers')}
+            ${escapeHtml(offlineActive ? 'Offline demo' : connected ? 'P2P live' : 'Seeking peers')}
           </span>
           <button class="ghost-action" id="leave-room" type="button">Leave</button>
         </div>
@@ -1182,7 +1228,12 @@ function renderRoom() {
           <span class="status-label">Saved</span>
           <strong>${metrics.saved}</strong>
         </div>
+        <div>
+          <span class="status-label">Pending</span>
+          <strong>${metrics.pending}</strong>
+        </div>
       </section>
+      ${renderOfflinePanel(metrics)}
       ${
         state.lastError
           ? `<p class="error-banner" role="status">${escapeHtml(state.lastError)}</p>`
@@ -1196,7 +1247,7 @@ function renderRoom() {
               <h2 id="chat-title">Terrace chat</h2>
               <p>${metrics.chats} messages from this room</p>
             </div>
-            <span class="local-pill ${connected ? 'connected' : ''}">${connected ? 'Live sync' : 'Local first'}</span>
+            <span class="local-pill ${offlineActive ? 'pending' : connected ? 'connected' : ''}">${offlineActive ? 'Offline' : connected ? 'Live sync' : 'Local first'}</span>
           </div>
           <div class="chat-list" id="chat-list">
             ${renderChatItems()}
@@ -1276,6 +1327,10 @@ function renderRoom() {
     sendWorkerCommand('room:leave')
   })
 
+  document.getElementById('offline-toggle').addEventListener('change', (event) => {
+    sendWorkerCommand('offline:set', { enabled: event.currentTarget.checked })
+  })
+
   document.getElementById('chat-form').addEventListener('submit', (event) => {
     event.preventDefault()
     const input = document.getElementById('chat-input')
@@ -1350,6 +1405,48 @@ function renderRoom() {
     startReplayEcho()
     sendWorkerCommand('echo:replay')
   })
+}
+
+function renderOfflinePanel(metrics) {
+  const offline = state.offline
+  const modeLabel = offline.enabled
+    ? 'Offline simulation'
+    : metrics.pending > 0
+      ? 'Reconnect pending'
+      : 'Network sync'
+  const flushLabel =
+    offline.lastFlushCount > 0
+      ? `${offline.lastFlushCount} caught up`
+      : offline.enabled
+        ? 'Queueing locally'
+        : state.peerCount > 0
+          ? 'Peers available'
+          : 'Searching'
+
+  return `
+    <section class="offline-demo-panel ${offline.enabled ? 'enabled' : ''}" aria-label="Offline reconnect status">
+      <div class="offline-demo-copy">
+        <span class="status-label">Reconnect demo</span>
+        <strong>${escapeHtml(modeLabel)}</strong>
+        <p>${escapeHtml(offline.detail)}</p>
+      </div>
+      <div class="offline-demo-stats">
+        <div>
+          <span>Pending</span>
+          <strong>${metrics.pending}</strong>
+        </div>
+        <div>
+          <span>Catch-up</span>
+          <strong>${escapeHtml(flushLabel)}</strong>
+        </div>
+      </div>
+      <label class="offline-toggle">
+        <input id="offline-toggle" type="checkbox" ${offline.enabled ? 'checked' : ''} />
+        <span aria-hidden="true"></span>
+        <strong>Simulate offline</strong>
+      </label>
+    </section>
+  `
 }
 
 function renderReplayPreview() {

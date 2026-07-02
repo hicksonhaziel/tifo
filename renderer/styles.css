@@ -594,6 +594,16 @@ input:focus {
   box-shadow: 0 0 0 5px rgba(47, 197, 125, 0.12);
 }
 
+.live-badge.offline {
+  border-color: rgba(240, 180, 76, 0.42);
+  color: #ffe0a8;
+}
+
+.live-badge.offline span {
+  background: var(--amber);
+  box-shadow: 0 0 0 5px rgba(240, 180, 76, 0.12);
+}
+
 .brand-mini h1 {
   overflow: hidden;
   font-size: clamp(24px, 3vw, 40px);
@@ -716,6 +726,10 @@ input:focus {
 
 .stage-summary.connected span {
   color: var(--green);
+}
+
+.stage-summary.offline span {
+  color: var(--amber);
 }
 
 .stage-summary.error span {
@@ -948,8 +962,139 @@ input:focus {
 }
 
 .match-strip {
-  grid-template-columns: minmax(0, 1fr) 0.55fr minmax(0, 1fr) 0.55fr;
+  grid-template-columns: minmax(0, 1fr) 0.55fr minmax(0, 1fr) 0.55fr 0.55fr;
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+}
+
+.offline-demo-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.55fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(117, 191, 255, 0.2);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(117, 191, 255, 0.08), transparent 56%), rgba(10, 10, 10, 0.88);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.2);
+  padding: 14px;
+}
+
+.offline-demo-panel.enabled {
+  border-color: rgba(240, 180, 76, 0.4);
+  background:
+    linear-gradient(135deg, rgba(240, 180, 76, 0.12), rgba(229, 57, 53, 0.06)),
+    rgba(10, 10, 10, 0.9);
+}
+
+.offline-demo-copy {
+  min-width: 0;
+}
+
+.offline-demo-copy strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.offline-demo-copy p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.offline-demo-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.offline-demo-stats div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 10px;
+}
+
+.offline-demo-stats span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.offline-demo-stats strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-toggle {
+  display: inline-grid;
+  grid-template-columns: 42px minmax(0, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.offline-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.offline-toggle span {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  transition:
+    background 180ms ease,
+    border-color 180ms ease;
+}
+
+.offline-toggle span::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--white-soft);
+  content: '';
+  transition:
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.offline-toggle input:checked + span {
+  border-color: rgba(240, 180, 76, 0.58);
+  background: rgba(240, 180, 76, 0.2);
+}
+
+.offline-toggle input:checked + span::after {
+  background: var(--amber);
+  transform: translateX(18px);
+}
+
+.offline-toggle input:focus-visible + span {
+  outline: 2px solid rgba(117, 191, 255, 0.72);
+  outline-offset: 3px;
 }
 
 .room-grid {
@@ -1008,6 +1153,11 @@ input:focus {
   color: #a9f3cd;
 }
 
+.local-pill.pending {
+  border-color: rgba(240, 180, 76, 0.38);
+  color: #ffe0a8;
+}
+
 .timeline-count {
   color: var(--muted);
   font-size: 12px;
@@ -1046,6 +1196,12 @@ input:focus {
 .timeline-event.stored {
   border-color: rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.055);
+}
+
+.chat-message.pending,
+.timeline-event.pending {
+  border-color: rgba(240, 180, 76, 0.45);
+  background: rgba(240, 180, 76, 0.08);
 }
 
 .chat-message div {
@@ -1089,6 +1245,12 @@ input:focus {
 .message-status.stored,
 .event-status.stored {
   color: var(--white-soft);
+}
+
+.message-status.pending,
+.event-status.pending {
+  border-color: rgba(240, 180, 76, 0.38);
+  color: #ffe0a8;
 }
 
 .chat-form {
@@ -1457,6 +1619,14 @@ input:focus {
     grid-template-columns: 1fr;
   }
 
+  .offline-demo-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .offline-toggle {
+    width: fit-content;
+  }
+
   .replay-preview {
     grid-template-columns: 1fr;
   }
@@ -1497,6 +1667,7 @@ input:focus {
 
   .status-grid,
   .match-strip,
+  .offline-demo-stats,
   .replay-preview,
   .room-stage {
     grid-template-columns: 1fr;
