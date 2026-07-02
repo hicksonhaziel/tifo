@@ -15,6 +15,11 @@ const mainWorkerSpecifier = '/workers/main.js'
 const workers = new Map()
 
 const appName = productName ?? name
+const appId = 'com.tifo.TIFO'
+const appIcon = path.join(__dirname, '..', 'build', 'icon', 'icon-256x256.png')
+
+app.setName(appName)
+app.setAppUserModelId(appId)
 
 const cmd = command(
   appName,
@@ -120,7 +125,8 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: '#090909',
     autoHideMenuBar: true,
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: appIcon,
+    title: appName,
     webPreferences: {
       preload: path.join(__dirname, '..', 'electron', 'preload.js'),
       sandbox: true,
