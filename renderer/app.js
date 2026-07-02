@@ -15,6 +15,11 @@ const state = {
   peerCount: 0,
   events: [],
   chatDraft: '',
+  clipDraft: {
+    caption: '',
+    error: '',
+    status: 'idle'
+  },
   offline: {
     detail: 'Network searching',
     enabled: false,
@@ -61,11 +66,14 @@ const reactionTypes = [
 const app = document.getElementById('app')
 const chantAudioUrls = new Map()
 const chantPrefetchIds = new Set()
+const clipPreviewUrls = new Map()
 const pendingChantLoads = new Map()
 const pendingChantUrls = new Map()
+const pendingClipPreviews = new Map()
 const CHANT_MIN_MS = 3000
 const CHANT_MAX_MS = 10000
 const FALLBACK_CHANT_MS = 3600
+const CLIP_PATH_STORAGE_KEY = 'tifo:clip-paths'
 const REPLAY_WINDOW_BEFORE_MS = 5000
 const REPLAY_WINDOW_AFTER_MS = 25000
 const REPLAY_DURATION_MS = 12000
@@ -115,6 +123,15 @@ function formatDuration(ms) {
   return `${Math.max(1, Math.round(ms / 1000))}s`
 }
 
+function formatClipDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Duration unknown'
+  const totalSeconds = Math.round(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes === 0) return `${seconds}s`
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 function roomParts(roomCode) {
   const parts = roomCode.split('-').filter(Boolean)
   return {
@@ -147,6 +164,13 @@ function eventMeta(event) {
     }
   }
 
+  if (event.type === 'clip') {
+    return {
+      label: 'Clip',
+      text: event.payload.caption || event.payload.filename
+    }
+  }
+
   return {
     label: 'System',
     text: event.payload.text
@@ -172,6 +196,7 @@ function roomMetrics() {
   return {
     chats: state.events.filter((event) => event.type === 'chat').length,
     chants: state.events.filter((event) => event.type === 'chant').length,
+    clips: state.events.filter((event) => event.type === 'clip').length,
     pending: Math.max(state.offline.pendingCount, pendingEvents.length),
     reactions: state.events.filter((event) => event.type === 'reaction').length,
     saved: state.events.filter((event) => event.status === 'stored').length,
@@ -186,6 +211,7 @@ function sendWorkerCommand(type, payload = {}) {
 
 function upsertEvent(event) {
   attachPendingChantUrl(event)
+  attachPendingClipPreview(event)
   prefetchChantAudio(event)
   const existingIndex = state.events.findIndex((item) => item.id === event.id)
   if (existingIndex >= 0) state.events.splice(existingIndex, 1)
@@ -336,6 +362,7 @@ function applyWorkerMessage(message) {
       state.syncStatus = message.syncStatus
       state.events = message.events || []
       state.chatDraft = ''
+      state.clipDraft = clipDraftIdle()
       state.offline = {
         detail: 'Network searching',
         enabled: false,
@@ -363,6 +390,8 @@ function applyWorkerMessage(message) {
       state.syncStatus = message.syncStatus || 'Worker ready'
       state.events = message.events || []
       state.chatDraft = ''
+      state.clipDraft = clipDraftIdle()
+      clearClipPreviewUrls()
       state.offline = {
         detail: 'Network searching',
         enabled: false,
@@ -415,7 +444,10 @@ function applyWorkerMessage(message) {
         const events = message.events || []
         shouldRender = eventListSignature(state.events) !== eventListSignature(events)
         if (shouldRender) {
-          for (const event of events) attachPendingChantUrl(event)
+          for (const event of events) {
+            attachPendingChantUrl(event)
+            attachPendingClipPreview(event)
+          }
           applyLiveEffects(events)
           state.events = events
           prefetchChantAudios(state.events)
@@ -496,6 +528,208 @@ function getFallbackChantUrl() {
   }
 
   return fallbackChantUrl
+}
+
+function readClipPathStore() {
+  try {
+    const raw = window.localStorage.getItem(CLIP_PATH_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveClipPathStore(store) {
+  try {
+    window.localStorage.setItem(CLIP_PATH_STORAGE_KEY, JSON.stringify(store))
+  } catch {
+    // Private preview restore is optional; timeline metadata still works.
+  }
+}
+
+function storeLocalClipPath(clipRef, localPath) {
+  if (!clipRef || !localPath) return
+  const store = readClipPathStore()
+  store[clipRef] = localPath
+  saveClipPathStore(store)
+}
+
+function localPathForClip(event) {
+  const clipRef = event?.payload?.clipRef
+  if (!clipRef) return ''
+  const store = readClipPathStore()
+  return typeof store[clipRef] === 'string' ? store[clipRef] : ''
+}
+
+function pathToFileUrl(filePath) {
+  if (!filePath) return ''
+  let normalized = filePath.replace(/\\/g, '/')
+  if (/^[a-z]:/i.test(normalized)) normalized = `/${normalized}`
+  const encoded = normalized
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+  return `file://${encoded.startsWith('/') ? encoded : `/${encoded}`}`
+}
+
+function clipPreviewUrlForEvent(event) {
+  if (clipPreviewUrls.has(event.id)) return clipPreviewUrls.get(event.id)
+  const localPath = localPathForClip(event)
+  return localPath ? pathToFileUrl(localPath) : ''
+}
+
+function clearClipPreviewUrls() {
+  for (const url of clipPreviewUrls.values()) URL.revokeObjectURL(url)
+  for (const preview of pendingClipPreviews.values()) URL.revokeObjectURL(preview.url)
+  clipPreviewUrls.clear()
+  pendingClipPreviews.clear()
+}
+
+function attachPendingClipPreview(event) {
+  const clientId = event?.payload?.clientId
+  if (event?.type !== 'clip' || !clientId || !pendingClipPreviews.has(clientId)) return
+
+  const preview = pendingClipPreviews.get(clientId)
+  clipPreviewUrls.set(event.id, preview.url)
+  if (preview.localPath) storeLocalClipPath(event.payload.clipRef, preview.localPath)
+  pendingClipPreviews.delete(clientId)
+}
+
+function clipDraftIdle(overrides = {}) {
+  return {
+    caption: '',
+    error: '',
+    status: 'idle',
+    ...overrides
+  }
+}
+
+function clipFileSupported(file) {
+  if (!file) return false
+  if (file.type && file.type.startsWith('video/')) return true
+  return /\.(mp4|m4v|mov|webm|ogg|ogv|mkv)$/i.test(file.name)
+}
+
+function bytesToHex(buffer) {
+  return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function clipRefForFile(file) {
+  const input = `${file.name}\n${file.size}\n${file.lastModified || 0}\n${file.type || ''}`
+  if (!window.crypto?.subtle) {
+    return `${file.size.toString(16)}-${(file.lastModified || Date.now()).toString(16)}`
+  }
+
+  const encoded = new TextEncoder().encode(input)
+  return bytesToHex(await window.crypto.subtle.digest('SHA-256', encoded))
+}
+
+function readVideoDuration(objectUrl) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    const timeout = setTimeout(() => done(null), 2400)
+
+    function done(durationMs) {
+      clearTimeout(timeout)
+      video.removeAttribute('src')
+      video.load()
+      resolve(durationMs)
+    }
+
+    video.preload = 'metadata'
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        const durationMs = Number.isFinite(video.duration)
+          ? Math.round(video.duration * 1000)
+          : null
+        done(durationMs)
+      },
+      { once: true }
+    )
+    video.addEventListener('error', () => done(null), { once: true })
+    video.src = objectUrl
+  })
+}
+
+function localPathForFile(file) {
+  if (typeof bridge.pathForFile !== 'function') return ''
+  try {
+    return bridge.pathForFile(file) || ''
+  } catch {
+    return ''
+  }
+}
+
+async function saveClipMetadata(file) {
+  if (state.clipDraft.status === 'saving') return
+
+  if (!clipFileSupported(file)) {
+    state.clipDraft = {
+      ...state.clipDraft,
+      error: 'Select a video clip file',
+      status: 'error'
+    }
+    render()
+    return
+  }
+
+  if (!Number.isFinite(file.size) || file.size < 1) {
+    state.clipDraft = {
+      ...state.clipDraft,
+      error: 'Selected clip is empty',
+      status: 'error'
+    }
+    render()
+    return
+  }
+
+  let objectUrl = ''
+  try {
+    objectUrl = URL.createObjectURL(file)
+    state.clipDraft = {
+      ...state.clipDraft,
+      error: '',
+      status: 'saving'
+    }
+    render()
+
+    const [clipRef, durationMs] = await Promise.all([
+      clipRefForFile(file),
+      readVideoDuration(objectUrl)
+    ])
+    const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    const localPath = localPathForFile(file)
+
+    pendingClipPreviews.set(clientId, {
+      localPath,
+      url: objectUrl
+    })
+    if (localPath) storeLocalClipPath(clipRef, localPath)
+
+    sendWorkerCommand('clip:save', {
+      caption: state.clipDraft.caption,
+      clientId,
+      clipRef,
+      durationMs,
+      filename: file.name,
+      lastModified: file.lastModified || null,
+      mimeType: file.type || 'video/mp4',
+      size: file.size
+    })
+
+    state.clipDraft = clipDraftIdle()
+    render()
+  } catch (err) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+    state.clipDraft = {
+      ...state.clipDraft,
+      error: err.message || 'Could not save clip metadata',
+      status: 'error'
+    }
+    render()
+  }
 }
 
 async function saveChantBlob({ blob, durationMs, mimeType }) {
@@ -628,6 +862,7 @@ function formatReplayOffset(ms) {
 function replayToneForEvent(event) {
   if (event.type === 'reaction') return reactionTheme(event.payload.type).tone
   if (event.type === 'chant') return 'cold'
+  if (event.type === 'clip') return 'warning'
   if (event.type === 'chat') return 'clean'
   return 'warning'
 }
@@ -704,7 +939,7 @@ function startReplayProgress(session) {
 function startReplayEcho(anchorId = '') {
   const session = buildReplaySession(anchorId)
   if (!session) {
-    state.lastError = 'Add a goal, reaction, chat, or chant before replaying Echo'
+    state.lastError = 'Add a goal, reaction, chat, clip, or chant before replaying Echo'
     render()
     return
   }
@@ -1268,7 +1503,7 @@ function renderRoom() {
           <div class="section-heading">
             <div>
               <h2 id="controls-title">Terrace actions</h2>
-              <p>${metrics.reactions} reactions, ${metrics.chants} chants</p>
+              <p>${metrics.reactions} reactions, ${metrics.chants} chants, ${metrics.clips} clips</p>
             </div>
           </div>
           <div class="reaction-grid">
@@ -1301,6 +1536,7 @@ function renderRoom() {
           <p class="control-note">
             ${hasEvents ? `${metrics.playableEvents.length} Echo-ready events` : 'Waiting for terrace noise'}
           </p>
+          ${renderClipPicker()}
           ${renderChantRecorder()}
         </aside>
 
@@ -1357,6 +1593,26 @@ function renderRoom() {
   if (fallbackChantButton) {
     fallbackChantButton.addEventListener('click', () => {
       saveFallbackChant()
+    })
+  }
+
+  const clipCaptionInput = document.getElementById('clip-caption')
+  if (clipCaptionInput) {
+    clipCaptionInput.addEventListener('input', (event) => {
+      state.clipDraft.caption = event.currentTarget.value
+    })
+  }
+
+  const clipInput = document.getElementById('clip-input')
+  const clipButton = document.getElementById('clip-select')
+  if (clipInput && clipButton) {
+    clipButton.addEventListener('click', () => {
+      clipInput.click()
+    })
+    clipInput.addEventListener('change', (event) => {
+      const file = event.currentTarget.files?.[0]
+      event.currentTarget.value = ''
+      if (file) saveClipMetadata(file)
     })
   }
 
@@ -1513,11 +1769,12 @@ function renderReplayMessages(replay) {
   return replay.messages
     .map(
       (message) => `
-        <article class="replay-message tone-${escapeHtml(safeClass(message.tone))}">
+        <article class="replay-message tone-${escapeHtml(safeClass(message.tone))} ${escapeHtml(safeClass(message.type))}">
           <span>${escapeHtml(message.offset)}</span>
           <div>
             <strong>${escapeHtml(message.label)}</strong>
-            <p>${escapeHtml(message.sender)} · ${escapeHtml(message.text)}</p>
+            <p>${escapeHtml(message.sender)} · ${escapeHtml(message.type === 'clip' ? `Clip card: ${message.text}` : message.text)}</p>
+            ${message.type === 'clip' ? '<em>Highlight clip placeholder</em>' : ''}
           </div>
         </article>
       `
@@ -1526,6 +1783,7 @@ function renderReplayMessages(replay) {
 }
 
 function renderTimelineEventBody(event, meta) {
+  if (event.type === 'clip') return renderClipEvent(event)
   if (event.type !== 'chant') return `<p>${escapeHtml(meta.text)}</p>`
 
   const audioUrl = chantAudioUrls.get(event.id)
@@ -1539,6 +1797,57 @@ function renderTimelineEventBody(event, meta) {
         audioUrl
           ? `<audio controls preload="metadata" src="${escapeHtml(audioUrl)}"></audio>`
           : `<button class="chant-load-action" type="button" data-chant-load="${escapeHtml(event.id)}" ${isLoading ? 'disabled' : ''}>${escapeHtml(isLoading ? 'Preparing audio' : 'Load audio')}</button>`
+      }
+    </div>
+  `
+}
+
+function renderClipPicker() {
+  const clip = state.clipDraft
+  const saving = clip.status === 'saving'
+
+  return `
+    <div class="clip-picker ${saving ? 'saving' : ''}">
+      <div>
+        <span class="status-label">Highlight clip</span>
+        <strong>${escapeHtml(saving ? 'Saving clip' : 'Clip metadata')}</strong>
+      </div>
+      <input
+        id="clip-caption"
+        maxlength="140"
+        placeholder="Clip caption"
+        value="${escapeHtml(clip.caption)}"
+        ${saving ? 'disabled' : ''}
+      />
+      <input id="clip-input" type="file" accept="video/*" hidden />
+      <button class="clip-action" id="clip-select" type="button" ${saving ? 'disabled' : ''}>
+        ${escapeHtml(saving ? 'Reading clip' : 'Select clip')}
+      </button>
+      ${
+        clip.error
+          ? `<p class="clip-error" role="status">${escapeHtml(clip.error)}</p>`
+          : `<p class="control-note">Only metadata is shared. The video file stays local.</p>`
+      }
+    </div>
+  `
+}
+
+function renderClipEvent(event) {
+  const payload = event.payload
+  const previewUrl = clipPreviewUrlForEvent(event)
+  const caption = payload.caption || 'No caption'
+  const duration = formatClipDuration(payload.durationMs)
+
+  return `
+    <div class="clip-card">
+      <div>
+        <strong>${escapeHtml(caption)}</strong>
+        <p>${escapeHtml(payload.filename)} · ${escapeHtml(duration)} · ${escapeHtml(formatBytes(payload.size))}</p>
+      </div>
+      ${
+        previewUrl
+          ? `<video class="clip-preview" controls preload="metadata" src="${escapeHtml(previewUrl)}"></video>`
+          : `<div class="clip-unavailable">Clip unavailable on this device</div>`
       }
     </div>
   `

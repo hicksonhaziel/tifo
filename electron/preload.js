@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 function toBuffer(data) {
   if (data === null || data === undefined || typeof data === 'number') return data
@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('bridge', {
   },
   applyUpdate: () => ipcRenderer.invoke('pear:applyUpdate'),
   appAfterUpdate: () => ipcRenderer.invoke('app:afterUpdate'),
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
   startWorker: (specifier) => ipcRenderer.invoke('pear:startWorker', specifier),
   onWorkerStdout: (specifier, listener) => {
     const wrap = (evt, data) => listener(toBuffer(data))

@@ -176,6 +176,18 @@ function createTifoRoomState(options = {}) {
     addEvent('chant', payload)
   }
 
+  function handleClipSave(command) {
+    if (!requireRoom(command.type)) return
+
+    const payload = sanitizeClipPayload(command)
+    if (!payload) {
+      sendError(command.type, 'Clip metadata is not valid')
+      return
+    }
+
+    addEvent('clip', payload)
+  }
+
   function handleEchoReplay(command) {
     if (!requireRoom(command.type)) return
 
@@ -209,6 +221,9 @@ function createTifoRoomState(options = {}) {
         break
       case 'chant:save':
         await handleChantSave(command)
+        break
+      case 'clip:save':
+        handleClipSave(command)
         break
       case 'echo:replay':
         handleEchoReplay(command)
@@ -262,7 +277,40 @@ function createTifoRoomState(options = {}) {
       }
     }
 
+    if (event.type === 'clip') return sanitizeClipPayload(payload)
+
     return null
+  }
+
+  function sanitizeClipPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    if (typeof payload.filename !== 'string' || payload.filename.trim() === '') return null
+    if (typeof payload.clipRef !== 'string' || payload.clipRef.trim() === '') return null
+
+    const size = Number(payload.size)
+    if (!Number.isFinite(size) || size < 1 || size > 50 * 1024 * 1024 * 1024) return null
+
+    const durationMs = Number(payload.durationMs)
+    const cleanDurationMs =
+      Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= 4 * 60 * 60 * 1000
+        ? Math.round(durationMs)
+        : null
+
+    const lastModified = Number(payload.lastModified)
+
+    return {
+      caption: typeof payload.caption === 'string' ? payload.caption.trim().slice(0, 140) : '',
+      clientId: typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : null,
+      clipRef: payload.clipRef.trim().slice(0, 96),
+      durationMs: cleanDurationMs,
+      filename: payload.filename.trim().slice(0, 140),
+      lastModified: Number.isFinite(lastModified) ? Math.round(lastModified) : null,
+      mimeType:
+        typeof payload.mimeType === 'string' && payload.mimeType.trim()
+          ? payload.mimeType.trim().slice(0, 80)
+          : 'video/mp4',
+      size: Math.round(size)
+    }
   }
 
   function addRemoteEvent(event) {
