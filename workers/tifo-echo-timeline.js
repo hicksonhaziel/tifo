@@ -257,7 +257,7 @@ function decodeEchoEvent(record, roomCode) {
   if (!record || typeof record !== 'object') return null
   if (record.room !== roomCode) return null
   if (typeof record.id !== 'string' || record.id.trim() === '') return null
-  if (!['chat', 'reaction', 'system'].includes(record.type)) return null
+  if (!['chat', 'chant', 'reaction', 'system'].includes(record.type)) return null
   if (!record.payload || typeof record.payload !== 'object') return null
 
   return {

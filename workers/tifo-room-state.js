@@ -6,6 +6,7 @@ function createTifoRoomState(options = {}) {
   const onLeaveRoom = options.onLeaveRoom || noop
   const onLocalEvent = options.onLocalEvent || noop
   const onRemoteEvent = options.onRemoteEvent || noop
+  const onChantSave = options.onChantSave || noop
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -47,6 +48,7 @@ function createTifoRoomState(options = {}) {
     state.events.unshift(event)
     send('event:added', { event })
     onLocalEvent(event)
+    return event
   }
 
   function sendError(command, message) {
@@ -148,17 +150,43 @@ function createTifoRoomState(options = {}) {
     })
   }
 
-  function handleEchoReplay(command) {
+  async function handleChantSave(command) {
     if (!requireRoom(command.type)) return
 
-    const hasEvents = state.events.some((event) => event.type !== 'system')
-    if (!hasEvents) {
-      sendError(command.type, 'Add a chat or reaction before replaying Echo')
+    const clientId = requireString(command.type, command.clientId, 'clientId')
+    const mimeType = requireString(command.type, command.mimeType, 'mimeType')
+    const bytesBase64 = requireString(command.type, command.bytesBase64, 'bytesBase64')
+    if (!clientId || !mimeType || !bytesBase64) return
+
+    const durationMs = Number(command.durationMs)
+    if (!Number.isFinite(durationMs) || durationMs < 2500 || durationMs > 11000) {
+      sendError(command.type, 'Chant must be 3 to 10 seconds')
       return
     }
 
-    addEvent('system', {
-      text: 'Replay Echo preview queued'
+    const payload = await onChantSave({
+      bytesBase64,
+      clientId: clientId.slice(0, 80),
+      durationMs: Math.round(durationMs),
+      mimeType: mimeType.slice(0, 80),
+      roomCode: state.room.code
+    })
+
+    if (!payload) return
+    addEvent('chant', payload)
+  }
+
+  function handleEchoReplay(command) {
+    if (!requireRoom(command.type)) return
+
+    const playableEvents = state.events.filter((event) => event.type !== 'system')
+    if (playableEvents.length === 0) {
+      sendError(command.type, 'Add a terrace event before replaying Echo')
+      return
+    }
+
+    send('echo:replay', {
+      eventCount: playableEvents.length
     })
   }
 
@@ -178,6 +206,9 @@ function createTifoRoomState(options = {}) {
         break
       case 'reaction:send':
         handleReactionSend(command)
+        break
+      case 'chant:save':
+        await handleChantSave(command)
         break
       case 'echo:replay':
         handleEchoReplay(command)
@@ -210,6 +241,24 @@ function createTifoRoomState(options = {}) {
       if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
       return {
         text: payload.text.trim().slice(0, 180)
+      }
+    }
+
+    if (event.type === 'chant') {
+      if (typeof payload.fileId !== 'string' || payload.fileId.trim() === '') return null
+      if (typeof payload.mimeType !== 'string' || payload.mimeType.trim() === '') return null
+      const durationMs = Number(payload.durationMs)
+      const size = Number(payload.size)
+      if (!Number.isFinite(durationMs) || durationMs < 1000 || durationMs > 12000) return null
+      if (!Number.isFinite(size) || size < 1) return null
+
+      return {
+        clientId:
+          typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : null,
+        durationMs: Math.round(durationMs),
+        fileId: payload.fileId.trim().slice(0, 120),
+        mimeType: payload.mimeType.trim().slice(0, 80),
+        size: Math.round(size)
       }
     }
 

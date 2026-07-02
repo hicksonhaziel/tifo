@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "autobase": "^7.28.1",
+    "bare-fs": "^4.7.2",
     "compact-encoding": "^3.3.0",
     "corestore": "^7.9.1",
     "framed-stream": "^1.0.1",

@@ -7,6 +7,7 @@ const FramedStream = require('framed-stream')
 const Protomux = require('protomux')
 const c = require('compact-encoding')
 const path = require('bare-path')
+const fs = require('bare-fs')
 const b4a = require('b4a')
 const { TifoEchoTimeline } = require('./tifo-echo-timeline')
 const { TifoEventLog } = require('./tifo-event-log')
@@ -50,6 +51,7 @@ const roomPeers = new Map()
 const roomControlProtocol = 'tifo-room-control-v1'
 let roomTopic = null
 let echoRefreshInterval = null
+const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 
@@ -57,6 +59,7 @@ const roomState = createTifoRoomState({
   send,
   onJoinRoom: handleJoinRoom,
   onLeaveRoom: handleLeaveRoom,
+  onChantSave: handleChantSave,
   onLocalEvent: handleLocalEvent,
   onRemoteEvent: handleRemoteEvent
 })
@@ -81,6 +84,29 @@ function normalizeKeyHex(key) {
 
 function chooseBaseKey(leftKey, rightKey) {
   return leftKey < rightKey ? leftKey : rightKey
+}
+
+function safeFilePart(value) {
+  return String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 96)
+}
+
+function chantExtension(mimeType) {
+  if (/wav/i.test(mimeType)) return 'wav'
+  if (/ogg/i.test(mimeType)) return 'ogg'
+  if (/mp4|mpeg/i.test(mimeType)) return 'm4a'
+  return 'webm'
+}
+
+function chantRoomDir(roomCode) {
+  return path.join(chantDir, safeFilePart(roomCode.trim().toUpperCase()))
+}
+
+function chantFilePath(roomCode, fileId) {
+  return path.join(chantRoomDir(roomCode), safeFilePart(fileId))
 }
 
 function sendPeer(peer, message) {
@@ -219,6 +245,78 @@ async function migrateLegacyRoomEvents(room, storedEvents) {
 
   for (const event of missingEvents) await echoTimeline.append(event)
   return echoTimeline.readAll()
+}
+
+async function handleChantSave(command) {
+  const data = b4a.from(command.bytesBase64, 'base64')
+  if (data.byteLength < 256) {
+    send('error', {
+      command: 'chant:save',
+      message: 'Recorded chant is empty'
+    })
+    return null
+  }
+
+  if (data.byteLength > 2 * 1024 * 1024) {
+    send('error', {
+      command: 'chant:save',
+      message: 'Recorded chant is too large'
+    })
+    return null
+  }
+
+  const extension = chantExtension(command.mimeType)
+  const fileId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}.${extension}`
+  const dir = chantRoomDir(command.roomCode)
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(path.join(dir, fileId), data)
+
+  return {
+    clientId: command.clientId,
+    durationMs: command.durationMs,
+    fileId,
+    mimeType: command.mimeType,
+    size: data.byteLength
+  }
+}
+
+async function handleChantLoad(command) {
+  const room = roomState.state.room
+  if (!room) {
+    send('error', {
+      command: 'chant:load',
+      message: 'Join a room before loading a chant'
+    })
+    return
+  }
+
+  if (typeof command.eventId !== 'string' || typeof command.fileId !== 'string') {
+    send('error', {
+      command: 'chant:load',
+      message: 'Chant event id and file id are required'
+    })
+    return
+  }
+
+  try {
+    const fileId = safeFilePart(command.fileId)
+    const data = await fs.readFile(chantFilePath(room.code, fileId))
+    const mimeType =
+      typeof command.mimeType === 'string' && command.mimeType.trim()
+        ? command.mimeType.trim().slice(0, 80)
+        : 'audio/webm'
+
+    send('chant:loaded', {
+      eventId: command.eventId.slice(0, 96),
+      dataUrl: `data:${mimeType};base64,${b4a.toString(data, 'base64')}`,
+      fileId
+    })
+  } catch {
+    send('error', {
+      command: 'chant:load',
+      message: 'This chant audio is not available on this device'
+    })
+  }
 }
 
 async function handlePeerMessage(peer, message) {
@@ -433,6 +531,11 @@ pipe.on('data', async (data) => {
   }
 
   try {
+    if (command.type === 'chant:load') {
+      await handleChantLoad(command)
+      return
+    }
+
     await roomState.handleCommand(command)
   } catch (err) {
     send('error', {
