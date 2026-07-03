@@ -52,6 +52,16 @@ import {
   profileName,
   saveLocalProfile
 } from '../tifo/identity.js'
+import {
+  createDmInvite,
+  createDmInviteForPeer,
+  createPrivateGroupInvite,
+  encodeInvite,
+  inviteToRoom,
+  loadRecentPrivateRooms,
+  parseInvite,
+  saveRecentPrivateRoom
+} from '../tifo/invites.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
@@ -59,7 +69,8 @@ import { formatReplayOffset } from '../tifo/format.js'
 export function useTifoController() {
   const [appState, setReactState] = useState(() =>
     createInitialState({
-      profile: loadLocalProfile()
+      profile: loadLocalProfile(),
+      recentPrivateRooms: loadRecentPrivateRooms()
     })
   )
   const stateRef = useRef(appState)
@@ -478,6 +489,8 @@ export function useTifoController() {
           profile: message.profile || state.profile,
           nickname: profileName(message.profile || state.profile),
           roomCode: message.room.code,
+          roomInvite: message.room.invite || '',
+          roomKind: message.room.kind || 'match',
           roomTitle: message.room.title,
           peerCount: message.peerCount,
           syncStatus: message.syncStatus,
@@ -520,6 +533,8 @@ export function useTifoController() {
         setAppState((state) => ({
           ...state,
           view: state.profile ? 'home' : 'welcome',
+          roomInvite: '',
+          roomKind: 'match',
           roomTitle: '',
           peerCount: 0,
           syncStatus: message.syncStatus || 'Worker ready',
@@ -1637,7 +1652,108 @@ export function useTifoController() {
     }
   }
 
-  function joinRoom({ roomCode }) {
+  function rememberPrivateRoom(room) {
+    const recentPrivateRooms = saveRecentPrivateRoom({
+      ...room,
+      lastJoinedAt: Date.now()
+    })
+    setAppState((state) => ({
+      ...state,
+      recentPrivateRooms
+    }))
+  }
+
+  function createPrivateGroup(input = {}) {
+    const profile = stateRef.current.profile
+    if (!profile) return null
+
+    const invite = createPrivateGroupInvite({
+      profile,
+      title: input.title
+    })
+    const inviteLink = encodeInvite(invite)
+    const room = inviteToRoom(invite)
+    rememberPrivateRoom({
+      ...invite,
+      invite: inviteLink
+    })
+
+    return {
+      invite,
+      inviteLink,
+      room
+    }
+  }
+
+  function createDmRoom(input = {}) {
+    const profile = stateRef.current.profile
+    if (!profile) return null
+
+    const invite = createDmInvite({
+      handle: input.handle,
+      profile
+    })
+    const inviteLink = encodeInvite(invite)
+    const room = inviteToRoom(invite)
+    rememberPrivateRoom({
+      ...invite,
+      invite: inviteLink
+    })
+
+    return {
+      invite,
+      inviteLink,
+      room
+    }
+  }
+
+  async function openDmFromEvent(event) {
+    const profile = stateRef.current.profile
+    if (!profile || !event) return
+
+    try {
+      const invite = await createDmInviteForPeer({
+        peer: {
+          name: event.sender,
+          publicKey: event.senderKey,
+          username: event.sender
+        },
+        profile
+      })
+      const inviteLink = encodeInvite(invite)
+      const room = inviteToRoom(invite)
+      rememberPrivateRoom({
+        ...invite,
+        invite: inviteLink
+      })
+      joinRoom({ room })
+    } catch (err) {
+      setAppState((state) => ({
+        ...state,
+        lastError: err.message || 'Could not open DM'
+      }))
+    }
+  }
+
+  function joinInvite(value) {
+    try {
+      const invite = parseInvite(value)
+      const inviteLink = encodeInvite(invite)
+      const room = inviteToRoom(invite)
+      rememberPrivateRoom({
+        ...invite,
+        invite: inviteLink
+      })
+      joinRoom({ room })
+    } catch (err) {
+      setAppState((state) => ({
+        ...state,
+        lastError: err.message || 'Invite link is not valid'
+      }))
+    }
+  }
+
+  function joinRoom({ roomCode, room }) {
     const profile = stateRef.current.profile
     if (!profile) {
       setAppState((state) => ({
@@ -1648,12 +1764,17 @@ export function useTifoController() {
       return
     }
 
-    if (!roomCode) return
+    const targetRoom = room || null
+    const targetRoomCode = targetRoom?.code || roomCode
+    if (!targetRoomCode) return
+
+    if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom)
 
     sendWorkerCommand('profile:set', { profile })
     sendWorkerCommand('room:join', {
       profile,
-      roomCode
+      room: targetRoom,
+      roomCode: targetRoomCode
     })
   }
 
@@ -1759,14 +1880,18 @@ export function useTifoController() {
 
   return {
     actions: {
+      createDmRoom,
+      createPrivateGroup,
       createProfile,
       deleteChatEvent,
       editChatMessage,
+      joinInvite,
       joinRoom,
       leaveRoom,
       loadChantAudio,
       loadChatMedia,
       loadClipVideo,
+      openDmFromEvent,
       replayFrom,
       reactToChatEvent,
       resetReplayPreview,

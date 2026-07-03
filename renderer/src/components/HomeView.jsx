@@ -1,11 +1,17 @@
-import { DoorOpen, KeyRound, RadioTower, Search } from 'lucide-react'
+import { Copy, DoorOpen, KeyRound, MessageCircle, Plus, RadioTower, Search } from 'lucide-react'
 import { useState } from 'react'
 
 import { profileLabel, shortProfileKey } from '../tifo/identity.js'
+import { roomInviteLabel } from '../tifo/invites.js'
 import { availableRooms } from '../tifo/rooms.js'
 
 export function HomeView({ actions, state }) {
   const [roomCode, setRoomCode] = useState('')
+  const [privateTitle, setPrivateTitle] = useState('')
+  const [dmHandle, setDmHandle] = useState('')
+  const [inviteText, setInviteText] = useState('')
+  const [createdInvite, setCreatedInvite] = useState(null)
+  const [copyStatus, setCopyStatus] = useState('')
   const profile = state.profile
 
   function submitCustomRoom(event) {
@@ -13,6 +19,40 @@ export function HomeView({ actions, state }) {
     const nextRoomCode = roomCode.trim().toUpperCase()
     if (!nextRoomCode) return
     actions.joinRoom({ roomCode: nextRoomCode })
+  }
+
+  function createPrivateGroup(event) {
+    event.preventDefault()
+    const result = actions.createPrivateGroup({ title: privateTitle })
+    if (!result) return
+    setCreatedInvite(result)
+    setPrivateTitle('')
+    setCopyStatus('')
+  }
+
+  function createDm(event) {
+    event.preventDefault()
+    if (!dmHandle.trim()) return
+    const result = actions.createDmRoom({ handle: dmHandle })
+    if (!result) return
+    setCreatedInvite(result)
+    setDmHandle('')
+    setCopyStatus('')
+  }
+
+  function joinInvite(event) {
+    event.preventDefault()
+    actions.joinInvite(inviteText)
+  }
+
+  async function copyInvite(inviteLink = createdInvite?.inviteLink) {
+    if (!inviteLink) return
+    try {
+      await window.navigator.clipboard.writeText(inviteLink)
+      setCopyStatus('Invite copied')
+    } catch {
+      setCopyStatus('Select and copy the invite link')
+    }
   }
 
   return (
@@ -49,7 +89,7 @@ export function HomeView({ actions, state }) {
           </div>
           <div>
             <span className='status-label'>Rooms</span>
-            <strong>{availableRooms.length} available</strong>
+            <strong>{availableRooms.length} public</strong>
           </div>
           <div>
             <span className='status-label'>App peers</span>
@@ -67,8 +107,8 @@ export function HomeView({ actions, state }) {
       <section className='rooms-panel' aria-labelledby='rooms-title'>
         <div className='panel-heading rooms-heading'>
           <div>
-            <p className='eyebrow'>Match rooms</p>
-            <h2 id='rooms-title'>Available terraces</h2>
+            <p className='eyebrow'>Fan hub</p>
+            <h2 id='rooms-title'>Match rooms, groups, and DMs</h2>
           </div>
           <span className='local-pill connected'>Ready</span>
         </div>
@@ -96,9 +136,112 @@ export function HomeView({ actions, state }) {
           ))}
         </div>
 
-        <form className='custom-room-form' onSubmit={submitCustomRoom}>
+        <div className='private-room-grid'>
+          <form className='private-room-tool' onSubmit={createPrivateGroup}>
+            <div>
+              <span className='status-label'>Private group</span>
+              <strong>Create group invite</strong>
+            </div>
+            <input
+              maxLength='48'
+              placeholder='Group name'
+              value={privateTitle}
+              onChange={(event) => setPrivateTitle(event.currentTarget.value)}
+            />
+            <button className='private-tool-action' type='submit'>
+              <Plus size={15} strokeWidth={2.4} />
+              Create group
+            </button>
+          </form>
+
+          <form className='private-room-tool' onSubmit={createDm}>
+            <div>
+              <span className='status-label'>Direct message</span>
+              <strong>Start DM</strong>
+            </div>
+            <input
+              maxLength='20'
+              placeholder='fan username'
+              value={dmHandle}
+              onChange={(event) => setDmHandle(event.currentTarget.value)}
+            />
+            <button className='private-tool-action' type='submit'>
+              <MessageCircle size={15} strokeWidth={2.4} />
+              Start DM
+            </button>
+          </form>
+        </div>
+
+        {createdInvite ? (
+          <div className='created-invite-panel'>
+            <div>
+              <span className='status-label'>{roomInviteLabel(createdInvite.room)}</span>
+              <strong>{createdInvite.room.title}</strong>
+            </div>
+            <input
+              readOnly
+              value={createdInvite.inviteLink}
+              onFocus={(event) => event.target.select()}
+            />
+            <div className='invite-actions'>
+              <button className='ghost-action' type='button' onClick={() => copyInvite()}>
+                <Copy size={15} strokeWidth={2.4} />
+                Copy invite
+              </button>
+              <button
+                className='primary-action'
+                type='button'
+                onClick={() => actions.joinRoom({ room: createdInvite.room })}
+              >
+                Open chat
+              </button>
+            </div>
+            {copyStatus ? <p className='control-note'>{copyStatus}</p> : null}
+          </div>
+        ) : null}
+
+        <form className='custom-room-form' onSubmit={joinInvite}>
           <label>
-            <span>Private room code</span>
+            <span>Join with invite</span>
+            <div className='custom-room-input'>
+              <KeyRound size={16} strokeWidth={2.4} />
+              <input
+                autoComplete='off'
+                placeholder='tifo://room/...'
+                value={inviteText}
+                onChange={(event) => setInviteText(event.currentTarget.value)}
+              />
+            </div>
+          </label>
+          <button
+            className='ghost-action inline-flex items-center justify-center gap-2'
+            type='submit'
+          >
+            <RadioTower size={16} strokeWidth={2.4} />
+            Join
+          </button>
+        </form>
+
+        {state.recentPrivateRooms.length > 0 ? (
+          <div className='recent-private-list'>
+            <span className='status-label'>Recent groups and DMs</span>
+            {state.recentPrivateRooms.map((room) => (
+              <div className='recent-private-row' key={room.code}>
+                <button type='button' onClick={() => actions.joinRoom({ room })}>
+                  <strong>{room.title}</strong>
+                  <span>{roomInviteLabel(room)}</span>
+                </button>
+                <button type='button' title='Copy invite' onClick={() => copyInvite(room.invite)}>
+                  <Copy size={14} strokeWidth={2.4} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <form className='custom-room-form compact' onSubmit={submitCustomRoom}>
+          <label>
+            <span>Public match code</span>
             <div className='custom-room-input'>
               <Search size={16} strokeWidth={2.4} />
               <input
@@ -121,7 +264,7 @@ export function HomeView({ actions, state }) {
 
         <div className='identity-note'>
           <KeyRound size={15} strokeWidth={2.4} />
-          <span>{profileLabel(profile)} joins every room from this device.</span>
+          <span>{profileLabel(profile)} joins rooms from this device.</span>
         </div>
       </section>
     </main>

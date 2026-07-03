@@ -1,4 +1,15 @@
-import { Check, ImagePlus, Mic, Pencil, Send, SmilePlus, StopCircle, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  ImagePlus,
+  MessageCircle,
+  Mic,
+  Pencil,
+  Send,
+  SmilePlus,
+  StopCircle,
+  Trash2,
+  X
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import 'emoji-picker-element'
 import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
@@ -6,7 +17,19 @@ import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
 import { eventStatus, eventStatusLabel, materializeChatEvents } from '../tifo/domain.js'
 import { formatBytes, formatDuration, formatTime } from '../tifo/format.js'
 
-export function ChatPanel({ actions, connected, derived, metrics, offlineActive, state }) {
+export function ChatPanel({
+  actions,
+  allowFanDm = false,
+  connected,
+  derived,
+  metrics,
+  offlineActive,
+  placeholder = 'Send a terrace message',
+  state,
+  subtitle = '',
+  surfaceClassName = '',
+  title = 'Terrace chat'
+}) {
   const imageInputRef = useRef(null)
   const chatInputRef = useRef(null)
   const emojiPickerRef = useRef(null)
@@ -92,13 +115,11 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
   }
 
   return (
-    <section className='chat-surface' aria-labelledby='chat-title'>
+    <section className={`chat-surface ${surfaceClassName}`} aria-labelledby='chat-title'>
       <div className='section-heading'>
         <div>
-          <h2 id='chat-title'>Terrace chat</h2>
-          <p>
-            {metrics.chats} text, {metrics.media} media from this room
-          </p>
+          <h2 id='chat-title'>{title}</h2>
+          <p>{subtitle || `${metrics.chats} text, ${metrics.media} media from this room`}</p>
         </div>
         <span className={`local-pill ${offlineActive ? 'pending' : connected ? 'connected' : ''}`}>
           {offlineActive ? 'Offline' : connected ? 'Live sync' : 'Local first'}
@@ -115,6 +136,7 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
           onReact={openReactionPicker}
           onSaveEdit={saveEdit}
           onStartEdit={startEditing}
+          allowFanDm={allowFanDm}
           state={state}
         />
       </div>
@@ -124,7 +146,7 @@ export function ChatPanel({ actions, connected, derived, metrics, offlineActive,
           id='chat-input'
           ref={chatInputRef}
           maxLength='180'
-          placeholder='Send a terrace message'
+          placeholder={placeholder}
           autoComplete='off'
           value={state.chatDraft}
           onChange={(event) => actions.setChatDraft(event.currentTarget.value)}
@@ -224,6 +246,7 @@ function ChatMediaStatus({ state }) {
 
 function ChatItems({
   actions,
+  allowFanDm,
   derived,
   editDraft,
   editingId,
@@ -234,6 +257,7 @@ function ChatItems({
   onStartEdit,
   state
 }) {
+  const [activeFanId, setActiveFanId] = useState('')
   const chatEvents = materializeChatEvents(state.events, state.profile)
   if (chatEvents.length === 0) {
     return <div className='empty-state'>No messages yet.</div>
@@ -242,12 +266,43 @@ function ChatItems({
   return chatEvents.map((event) => {
     const status = eventStatus(event, state)
     const own = event.chatState?.own === true
+    const canOpenFan = allowFanDm && !own && !!event.senderKey
     return (
-      <article className={`chat-message ${status}`} key={event.id}>
+      <article className={`chat-message ${status} ${own ? 'own' : ''}`} key={event.id}>
         <div className='chat-message-header'>
-          <strong>{event.sender}</strong>
+          {canOpenFan ? (
+            <button
+              className='chat-sender-button'
+              type='button'
+              onClick={() => setActiveFanId((id) => (id === event.id ? '' : event.id))}
+            >
+              {event.sender}
+            </button>
+          ) : (
+            <strong>{event.sender}</strong>
+          )}
           <span>{formatTime(event.timestamp)}</span>
         </div>
+        {activeFanId === event.id ? (
+          <div className='chat-profile-popover'>
+            <div>
+              <strong>{event.sender}</strong>
+              <span>
+                {event.senderKey
+                  ? `${event.senderKey.slice(0, 6)}...${event.senderKey.slice(-4)}`
+                  : 'fan'}
+              </span>
+            </div>
+            <button
+              className='private-tool-action'
+              type='button'
+              onClick={() => actions.openDmFromEvent(event)}
+            >
+              <MessageCircle size={14} strokeWidth={2.4} />
+              Message
+            </button>
+          </div>
+        ) : null}
         <ChatMessageBody
           actions={actions}
           derived={derived}

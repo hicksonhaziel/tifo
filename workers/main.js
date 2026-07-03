@@ -84,8 +84,12 @@ const roomState = createTifoRoomState({
   onRemoteEvent: handleRemoteEvent
 })
 
-function topicForRoom(roomCode) {
-  return crypto.namespace(`tifo-room:${roomCode.trim().toUpperCase()}`, 1)[0]
+function topicForRoom(room) {
+  const topicKey =
+    room && typeof room.topicKey === 'string' && room.topicKey.trim()
+      ? room.topicKey.trim().toLowerCase()
+      : room?.code?.trim().toUpperCase()
+  return crypto.namespace(`tifo-room:${topicKey}`, 1)[0]
 }
 
 function peerIdFor(connection, peerInfo) {
@@ -1770,7 +1774,7 @@ function joinRoomNetwork(room) {
 
   startEchoRefresh()
 
-  roomTopic = topicForRoom(room.code)
+  roomTopic = topicForRoom(room)
   const roomDiscovery = roomSwarm.join(roomTopic, {
     client: true,
     server: true

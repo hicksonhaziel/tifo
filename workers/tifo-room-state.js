@@ -27,6 +27,40 @@ function createTifoRoomState(options = {}) {
     return roomCode.trim().replace(/-/g, ' ').replace(/\s+/g, ' ').toUpperCase()
   }
 
+  function sanitizeRoom(command) {
+    const source = command.room && typeof command.room === 'object' ? command.room : {}
+    const roomCode = requireString(command.type, source.code || command.roomCode, 'roomCode')
+    if (!roomCode) return null
+
+    const kind =
+      source.kind === 'dm'
+        ? 'dm'
+        : source.kind === 'group' || source.kind === 'private'
+          ? 'group'
+          : 'match'
+    const title =
+      typeof source.title === 'string' && source.title.trim()
+        ? source.title.trim().replace(/\s+/g, ' ').slice(0, 64)
+        : roomTitle(roomCode)
+    const topicKey =
+      typeof source.topicKey === 'string' && /^[0-9a-f]{64}$/i.test(source.topicKey.trim())
+        ? source.topicKey.trim().toLowerCase()
+        : ''
+
+    if ((kind === 'group' || kind === 'dm') && !topicKey) {
+      sendError(command.type, 'invite secret is required')
+      return null
+    }
+
+    return {
+      code: cleanRoomCode(roomCode),
+      invite: typeof source.invite === 'string' ? source.invite.trim().slice(0, 1400) : '',
+      kind,
+      title,
+      topicKey
+    }
+  }
+
   function emptyProfile() {
     return {
       displayName: '',
@@ -117,6 +151,16 @@ function createTifoRoomState(options = {}) {
     return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
   }
 
+  function cleanRoomCode(value) {
+    return String(value || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 48)
+  }
+
   function actorKeyForEvent(event) {
     return event?.senderKey || event?.senderId || event?.sender || ''
   }
@@ -174,17 +218,14 @@ function createTifoRoomState(options = {}) {
 
   async function handleRoomJoin(command) {
     const profile = sanitizeProfile(command)
-    const roomCode = requireString(command.type, command.roomCode, 'roomCode')
-    if (!profile || !roomCode) {
+    const room = sanitizeRoom(command)
+    if (!profile || !room) {
       if (!profile) sendError(command.type, 'profile is required')
       return
     }
 
     state.profile = profile
-    state.room = {
-      code: roomCode.slice(0, 32),
-      title: roomTitle(roomCode)
-    }
+    state.room = room
     state.events = []
     state.seenEventIds.clear()
 
