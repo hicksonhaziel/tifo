@@ -23,7 +23,7 @@ export function createDmInvite(input = {}) {
   const now = Date.now()
   const roomId = randomToken(10)
   const topicKey = randomHex(32)
-  const title = handle ? `@${handle}` : cleanTitle(input.title) || 'Direct message'
+  const title = cleanDmTitle(input.title, handle)
 
   return {
     code: `DM-${roomId}`,
@@ -51,7 +51,7 @@ export async function createDmInviteForPeer(input = {}) {
   const pair = [localKey, peerKey].sort().join(':')
   const topicKey = await sha256Hex(`tifo-dm:v1:${pair}`)
   const handle = cleanHandle(peer.username || peer.name)
-  const title = handle ? `@${handle}` : cleanTitle(peer.name) || 'Direct message'
+  const title = cleanDmTitle(peer.name, handle)
 
   return {
     code: `DM-${topicKey.slice(0, 20).toUpperCase()}`,
@@ -84,34 +84,55 @@ export function parseInvite(value) {
   return sanitizeInvite(parsed)
 }
 
-export function inviteToRoom(invite) {
+export function inviteToRoom(invite, options = {}) {
   const clean = sanitizeInvite(invite)
   return {
     code: clean.code,
     invite: encodeInvite(clean),
     kind: clean.kind,
-    title: clean.title,
+    title: clean.kind === 'dm' ? dmTitleForProfile(clean, options.profile) : clean.title,
     topicKey: clean.topicKey
   }
 }
 
-export function loadRecentPrivateRooms() {
+export function dmTitleForProfile(invite, profile = null) {
+  const clean = sanitizeInvite(invite)
+  if (clean.kind !== 'dm') return clean.title
+
+  const profileKey =
+    typeof profile?.publicKey === 'string' ? profile.publicKey.trim().toLowerCase() : ''
+  const creatorKey =
+    typeof clean.creator?.publicKey === 'string' ? clean.creator.publicKey.trim().toLowerCase() : ''
+  if (profileKey && creatorKey && profileKey !== creatorKey) {
+    return cleanDmTitle(clean.creator.username, clean.creator.username)
+  }
+
+  return cleanDmTitle(clean.title, clean.peerHandle)
+}
+
+export function loadRecentPrivateRooms(profile = null) {
   try {
     const raw = window.localStorage.getItem(RECENT_PRIVATE_ROOMS_KEY)
     if (!raw) return []
     const rooms = JSON.parse(raw)
     if (!Array.isArray(rooms)) return []
-    return rooms.map(sanitizeRecentRoom).filter(Boolean).slice(0, 8)
+    return rooms
+      .map((room) => sanitizeRecentRoom(room, profile))
+      .filter(Boolean)
+      .slice(0, 8)
   } catch {
     return []
   }
 }
 
-export function saveRecentPrivateRoom(room) {
-  const clean = sanitizeRecentRoom(room)
-  if (!clean) return loadRecentPrivateRooms()
+export function saveRecentPrivateRoom(room, profile = null) {
+  const clean = sanitizeRecentRoom(room, profile)
+  if (!clean) return loadRecentPrivateRooms(profile)
 
-  const next = [clean, ...loadRecentPrivateRooms().filter((item) => item.code !== clean.code)]
+  const next = [
+    clean,
+    ...loadRecentPrivateRooms(profile).filter((item) => item.code !== clean.code)
+  ]
     .sort((left, right) => right.lastJoinedAt - left.lastJoinedAt)
     .slice(0, 8)
 
@@ -133,7 +154,10 @@ function sanitizeInvite(invite) {
 
   const kind = invite.kind === 'dm' ? 'dm' : 'group'
   const code = cleanCode(invite.code || `${kind === 'dm' ? 'DM' : 'GRP'}-${randomToken(10)}`)
-  const title = cleanTitle(invite.title) || (kind === 'dm' ? 'Direct message' : 'Private group')
+  const title =
+    kind === 'dm'
+      ? cleanDmTitle(invite.title, invite.peerHandle)
+      : cleanTitle(invite.title) || 'Private group'
 
   return {
     code,
@@ -147,13 +171,14 @@ function sanitizeInvite(invite) {
   }
 }
 
-function sanitizeRecentRoom(room) {
+function sanitizeRecentRoom(room, profile = null) {
   try {
     const invite = sanitizeInvite(room)
     return {
       ...invite,
       invite: typeof room.invite === 'string' ? room.invite : encodeInvite(invite),
-      lastJoinedAt: Number.isFinite(room.lastJoinedAt) ? room.lastJoinedAt : Date.now()
+      lastJoinedAt: Number.isFinite(room.lastJoinedAt) ? room.lastJoinedAt : Date.now(),
+      title: invite.kind === 'dm' ? dmTitleForProfile(invite, profile) : invite.title
     }
   } catch {
     return null
@@ -167,6 +192,21 @@ function cleanTitle(value) {
     .slice(0, 48)
 }
 
+function cleanDmTitle(value, fallbackHandle = '') {
+  const legacyTitle = cleanTitle(value)
+    .replace(/^dm\s+with\s+/i, '')
+    .replace(/^direct\s+message\s+with\s+/i, '')
+    .replace(/^@+/, '')
+  const normalizedLegacyTitle = legacyTitle.toLowerCase()
+  const handle = cleanHandle(
+    normalizedLegacyTitle === 'dm' || normalizedLegacyTitle === 'direct message'
+      ? fallbackHandle
+      : legacyTitle || fallbackHandle
+  )
+  if (!handle) return 'Direct message'
+  return displayUsername(handle)
+}
+
 function cleanHandle(value) {
   return String(value || '')
     .trim()
@@ -174,6 +214,12 @@ function cleanHandle(value) {
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '')
     .slice(0, 20)
+}
+
+function displayUsername(handle) {
+  const clean = cleanHandle(handle)
+  if (!clean) return ''
+  return clean.slice(0, 1).toUpperCase() + clean.slice(1)
 }
 
 function cleanCode(value) {

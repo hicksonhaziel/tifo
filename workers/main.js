@@ -863,6 +863,7 @@ async function handleChatMediaSave(command) {
     size: data.byteLength,
     width: kind === 'image' && Number.isFinite(width) && width > 0 ? Math.round(width) : null
   }
+  if (command.replyTo && typeof command.replyTo === 'object') savedPayload.replyTo = command.replyTo
 
   await relayMailboxChatMedia(savedPayload, data).catch(() => {})
   return savedPayload
@@ -1755,27 +1756,48 @@ async function processMailboxRecord(record) {
   if (!event?.id) return
 
   mailbox.rememberContactFromEvent(event)
-  announceMailboxConversation(record.room)
+  announceMailboxConversation(record.room, event)
   if (roomState.state.room?.code !== event.room) return
 
   roomState.addRemoteEvent(event)
 }
 
-function announceMailboxConversation(room) {
+function announceMailboxConversation(room, event = null) {
   if (!room || !['group', 'dm'].includes(room.kind)) return
   const key = `${room.kind}:${room.code}`
   if (announcedMailboxRooms.has(key)) return
   announcedMailboxRooms.add(key)
+
+  const localKey = roomState.state.profile.publicKey || ''
+  const remoteSender =
+    room.kind === 'dm' &&
+    event?.senderKey &&
+    event.senderKey !== localKey &&
+    typeof event.sender === 'string' &&
+    event.sender.trim()
+      ? displayUsername(event.sender)
+      : ''
 
   send('mailbox:conversation', {
     room: {
       code: room.code,
       invite: room.invite || '',
       kind: room.kind,
-      title: room.title,
+      title: remoteSender || room.title,
       topicKey: room.topicKey
     }
   })
+}
+
+function displayUsername(value) {
+  const clean = String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 20)
+  if (!clean) return ''
+  return clean.slice(0, 1).toUpperCase() + clean.slice(1)
 }
 
 async function processKnownMailboxRecords(topicHashes = mailbox.knownTopicHashes()) {

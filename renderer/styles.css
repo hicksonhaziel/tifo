@@ -1819,6 +1819,52 @@ input:focus {
   overflow-wrap: anywhere;
 }
 
+.chat-reply-preview {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  border-left: 3px solid rgba(117, 191, 255, 0.62);
+  border-radius: 6px;
+  background: rgba(117, 191, 255, 0.08);
+  padding: 8px 10px;
+}
+
+.chat-reply-preview.composer {
+  margin-top: 12px;
+  border: 1px solid rgba(117, 191, 255, 0.22);
+  border-left-width: 3px;
+  background:
+    linear-gradient(135deg, rgba(117, 191, 255, 0.1), transparent 60%), rgba(255, 255, 255, 0.04);
+}
+
+.chat-reply-preview div {
+  min-width: 0;
+}
+
+.chat-reply-preview strong,
+.chat-reply-preview span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-reply-preview strong {
+  color: #d8efff;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.chat-reply-preview span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .edited-label {
   display: inline-flex;
   margin-left: 7px;

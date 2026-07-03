@@ -4,6 +4,7 @@ import {
   MessageCircle,
   Mic,
   Pencil,
+  Reply,
   Send,
   SmilePlus,
   StopCircle,
@@ -114,6 +115,11 @@ export function ChatPanel({
     cancelEditing()
   }
 
+  function startReply(event) {
+    actions.startChatReply(event)
+    window.requestAnimationFrame(() => chatInputRef.current?.focus())
+  }
+
   return (
     <section className={`chat-surface ${surfaceClassName}`} aria-labelledby='chat-title'>
       <div className='section-heading'>
@@ -136,11 +142,19 @@ export function ChatPanel({
           onReact={openReactionPicker}
           onSaveEdit={saveEdit}
           onStartEdit={startEditing}
+          onStartReply={startReply}
           allowFanDm={allowFanDm}
           state={state}
         />
       </div>
       {emojiOpen && emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
+      {state.chatReply ? (
+        <ChatReplyPreview
+          mode='composer'
+          onCancel={actions.cancelChatReply}
+          reply={state.chatReply}
+        />
+      ) : null}
       <form id='chat-form' className='chat-form' onSubmit={submitChat}>
         <input
           id='chat-input'
@@ -255,6 +269,7 @@ function ChatItems({
   onReact,
   onSaveEdit,
   onStartEdit,
+  onStartReply,
   state
 }) {
   const [activeFanId, setActiveFanId] = useState('')
@@ -322,6 +337,14 @@ function ChatItems({
         <div className='chat-message-footer'>
           <span className={`message-status ${status}`}>{eventStatusLabel(event, state)}</span>
           <div className='chat-message-actions'>
+            <button
+              className='chat-inline-action'
+              type='button'
+              title='Reply'
+              onClick={() => onStartReply(event)}
+            >
+              <Reply size={14} strokeWidth={2.4} />
+            </button>
             <button
               className='chat-inline-action'
               type='button'
@@ -393,10 +416,13 @@ function ChatMessageBody({
     }
 
     return (
-      <p>
-        {event.payload.text}
-        {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
-      </p>
+      <>
+        <ChatReplyPreview reply={event.payload.replyTo} />
+        <p>
+          {event.payload.text}
+          {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
+        </p>
+      </>
     )
   }
 
@@ -407,6 +433,7 @@ function ChatMessageBody({
   if (payload.kind === 'image') {
     return (
       <div className='chat-media-message image'>
+        <ChatReplyPreview reply={payload.replyTo} />
         {payload.caption ? <p>{payload.caption}</p> : null}
         {mediaUrl ? (
           <img src={mediaUrl} alt={payload.caption || 'Shared match photo'} />
@@ -427,6 +454,7 @@ function ChatMessageBody({
 
   return (
     <div className='chat-media-message voice'>
+      <ChatReplyPreview reply={payload.replyTo} />
       <p>Voice note · {formatDuration(payload.durationMs || 0)}</p>
       {mediaUrl ? (
         <audio controls preload='metadata' src={mediaUrl}></audio>
@@ -441,6 +469,29 @@ function ChatMessageBody({
         </button>
       )}
       <small>{formatBytes(payload.size)}</small>
+    </div>
+  )
+}
+
+function ChatReplyPreview({ mode = 'message', onCancel, reply }) {
+  if (!reply) return null
+
+  return (
+    <div className={`chat-reply-preview ${mode}`}>
+      <div>
+        <strong>{mode === 'composer' ? `Replying to ${reply.sender}` : reply.sender}</strong>
+        <span>{reply.text || reply.kind || 'Message'}</span>
+      </div>
+      {mode === 'composer' ? (
+        <button
+          className='chat-inline-action'
+          type='button'
+          title='Cancel reply'
+          onClick={onCancel}
+        >
+          <X size={14} strokeWidth={2.4} />
+        </button>
+      ) : null}
     </div>
   )
 }

@@ -328,14 +328,18 @@ function cleanRoom(room) {
       : ''
   if ((kind === 'group' || kind === 'dm') && !topicKey) return null
 
+  const title =
+    kind === 'dm'
+      ? cleanDmTitle(room.title || room.peerHandle)
+      : typeof room.title === 'string' && room.title.trim()
+        ? room.title.trim().replace(/\s+/g, ' ').slice(0, 64)
+        : code
+
   return {
     code,
     invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
     kind,
-    title:
-      typeof room.title === 'string' && room.title.trim()
-        ? room.title.trim().replace(/\s+/g, ' ').slice(0, 64)
-        : code,
+    title,
     topicKey
   }
 }
@@ -366,9 +370,24 @@ function dmRoomForPeer(profile, peer) {
   return {
     code: `DM-${topicKey.slice(0, 20).toUpperCase()}`,
     kind: 'dm',
-    title: username ? `@${username}` : 'Direct message',
+    title: displayUsername(username) || 'Direct message',
     topicKey
   }
+}
+
+function cleanDmTitle(value) {
+  const legacyTitle = String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^dm\s+with\s+/i, '')
+    .replace(/^direct\s+message\s+with\s+/i, '')
+    .replace(/^@+/, '')
+  const normalizedLegacyTitle = legacyTitle.toLowerCase()
+  const username =
+    normalizedLegacyTitle === 'dm' || normalizedLegacyTitle === 'direct message'
+      ? ''
+      : cleanUsername(legacyTitle)
+  return displayUsername(username) || 'Direct message'
 }
 
 function cleanUsername(value) {
@@ -378,6 +397,12 @@ function cleanUsername(value) {
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '')
     .slice(0, 20)
+}
+
+function displayUsername(username) {
+  const clean = cleanUsername(username)
+  if (!clean) return ''
+  return clean.slice(0, 1).toUpperCase() + clean.slice(1)
 }
 
 function cleanRoomCode(value) {

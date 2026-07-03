@@ -32,6 +32,7 @@ import {
   storeLocalClipPath
 } from '../tifo/clips.js'
 import {
+  chatReplySnapshot,
   eventListSignature,
   eventMeta,
   eventStatus,
@@ -68,12 +69,13 @@ import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
 
 export function useTifoController() {
-  const [appState, setReactState] = useState(() =>
-    createInitialState({
-      profile: loadLocalProfile(),
-      recentPrivateRooms: loadRecentPrivateRooms()
+  const [appState, setReactState] = useState(() => {
+    const profile = loadLocalProfile()
+    return createInitialState({
+      profile,
+      recentPrivateRooms: loadRecentPrivateRooms(profile)
     })
-  )
+  })
   const stateRef = useRef(appState)
   const decoderRef = useRef(new TextDecoder('utf-8'))
   const workerClientRef = useRef(null)
@@ -528,6 +530,7 @@ export function useTifoController() {
           syncStatus: message.syncStatus,
           events: message.events || [],
           chatDraft: '',
+          chatReply: null,
           chatMedia: {
             imageError: '',
             imageStatus: 'idle',
@@ -572,6 +575,7 @@ export function useTifoController() {
           syncStatus: message.syncStatus || 'Worker ready',
           events: message.events || [],
           chatDraft: '',
+          chatReply: null,
           chatMedia: {
             imageError: '',
             imageStatus: 'idle',
@@ -937,6 +941,8 @@ export function useTifoController() {
   }
 
   async function saveVoiceNoteBlob({ blob, durationMs, mimeType }) {
+    const replyTo = stateRef.current.chatReply
+
     if (blob.size < 1) {
       setAppState((state) => ({
         ...state,
@@ -985,11 +991,13 @@ export function useTifoController() {
       kind: 'voice',
       mediaRef,
       mimeType,
+      replyTo,
       size: blob.size
     })
 
     setAppState((state) => ({
       ...state,
+      chatReply: null,
       chatMedia: {
         ...state.chatMedia,
         voiceElapsedMs: 0,
@@ -1156,6 +1164,7 @@ export function useTifoController() {
 
   async function saveChatImage(file, caption = '') {
     if (stateRef.current.chatMedia.imageStatus === 'saving') return
+    const replyTo = stateRef.current.chatReply
 
     if (!imageFileSupported(file)) {
       setAppState((state) => ({
@@ -1222,6 +1231,7 @@ export function useTifoController() {
         localPath,
         mediaRef,
         mimeType: imageMimeType(file),
+        replyTo,
         size: file.size,
         width: dimensions?.width || null
       })
@@ -1229,6 +1239,7 @@ export function useTifoController() {
       setAppState((state) => ({
         ...state,
         chatDraft: caption.trim() ? '' : state.chatDraft,
+        chatReply: null,
         chatMedia: {
           ...state.chatMedia,
           imageError: '',
@@ -1667,12 +1678,14 @@ export function useTifoController() {
   function createProfile(input) {
     try {
       const profile = createLocalProfile(input)
+      const recentPrivateRooms = loadRecentPrivateRooms(profile)
       saveLocalProfile(profile)
       setAppState((state) => ({
         ...state,
         lastError: '',
         nickname: profileName(profile),
         profile,
+        recentPrivateRooms,
         view: 'home'
       }))
       sendWorkerCommand('profile:set', { profile })
@@ -1686,10 +1699,13 @@ export function useTifoController() {
   }
 
   function rememberPrivateRoom(room) {
-    const recentPrivateRooms = saveRecentPrivateRoom({
-      ...room,
-      lastJoinedAt: Date.now()
-    })
+    const recentPrivateRooms = saveRecentPrivateRoom(
+      {
+        ...room,
+        lastJoinedAt: Date.now()
+      },
+      stateRef.current.profile
+    )
     setAppState((state) => ({
       ...state,
       recentPrivateRooms
@@ -1709,7 +1725,7 @@ export function useTifoController() {
       title: input.title
     })
     const inviteLink = encodeInvite(invite)
-    const room = inviteToRoom(invite)
+    const room = inviteToRoom(invite, { profile })
     rememberPrivateRoom({
       ...invite,
       invite: inviteLink
@@ -1731,7 +1747,7 @@ export function useTifoController() {
       profile
     })
     const inviteLink = encodeInvite(invite)
-    const room = inviteToRoom(invite)
+    const room = inviteToRoom(invite, { profile })
     rememberPrivateRoom({
       ...invite,
       invite: inviteLink
@@ -1758,7 +1774,7 @@ export function useTifoController() {
         profile
       })
       const inviteLink = encodeInvite(invite)
-      const room = inviteToRoom(invite)
+      const room = inviteToRoom(invite, { profile })
       rememberPrivateRoom({
         ...invite,
         invite: inviteLink
@@ -1776,7 +1792,7 @@ export function useTifoController() {
     try {
       const invite = parseInvite(value)
       const inviteLink = encodeInvite(invite)
-      const room = inviteToRoom(invite)
+      const room = inviteToRoom(invite, { profile: stateRef.current.profile })
       rememberPrivateRoom({
         ...invite,
         invite: inviteLink
@@ -1822,11 +1838,29 @@ export function useTifoController() {
   function sendChat(text) {
     const clean = text.trim()
     if (!clean) return
+    const replyTo = stateRef.current.chatReply
     setAppState((state) => ({
       ...state,
-      chatDraft: ''
+      chatDraft: '',
+      chatReply: null
     }))
-    sendWorkerCommand('chat:send', { text: clean })
+    sendWorkerCommand('chat:send', { replyTo, text: clean })
+  }
+
+  function startChatReply(event) {
+    const replyTo = chatReplySnapshot(event)
+    if (!replyTo) return
+    setAppState((state) => ({
+      ...state,
+      chatReply: replyTo
+    }))
+  }
+
+  function cancelChatReply() {
+    setAppState((state) => ({
+      ...state,
+      chatReply: null
+    }))
   }
 
   function editChatMessage(targetId, text) {
@@ -1920,6 +1954,7 @@ export function useTifoController() {
       createDmRoom,
       createPrivateGroup,
       createProfile,
+      cancelChatReply,
       deleteChatEvent,
       editChatMessage,
       joinInvite,
@@ -1940,6 +1975,7 @@ export function useTifoController() {
       setChatDraft,
       setClipCaption,
       setOffline,
+      startChatReply,
       startChantRecording,
       startVoiceNoteRecording,
       stopChantRecording,

@@ -39,9 +39,11 @@ function createTifoRoomState(options = {}) {
           ? 'group'
           : 'match'
     const title =
-      typeof source.title === 'string' && source.title.trim()
-        ? source.title.trim().replace(/\s+/g, ' ').slice(0, 64)
-        : roomTitle(roomCode)
+      kind === 'dm'
+        ? cleanDmTitle(source.title || source.peerHandle)
+        : typeof source.title === 'string' && source.title.trim()
+          ? source.title.trim().replace(/\s+/g, ' ').slice(0, 64)
+          : roomTitle(roomCode)
     const topicKey =
       typeof source.topicKey === 'string' && /^[0-9a-f]{64}$/i.test(source.topicKey.trim())
         ? source.topicKey.trim().toLowerCase()
@@ -132,6 +134,27 @@ function createTifoRoomState(options = {}) {
       .slice(0, 20)
   }
 
+  function cleanDmTitle(value) {
+    const legacyTitle = String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/^dm\s+with\s+/i, '')
+      .replace(/^direct\s+message\s+with\s+/i, '')
+      .replace(/^@+/, '')
+    const normalizedLegacyTitle = legacyTitle.toLowerCase()
+    const username =
+      normalizedLegacyTitle === 'dm' || normalizedLegacyTitle === 'direct message'
+        ? ''
+        : cleanUsername(legacyTitle)
+    return displayUsername(username) || 'Direct message'
+  }
+
+  function displayUsername(username) {
+    const clean = cleanUsername(username)
+    if (!clean) return ''
+    return clean.slice(0, 1).toUpperCase() + clean.slice(1)
+  }
+
   function cleanDisplayName(value) {
     return String(value || '')
       .trim()
@@ -173,6 +196,74 @@ function createTifoRoomState(options = {}) {
     const eventActor = actorKeyForEvent(event)
     const profileActor = actorKeyForProfile(profile)
     return !!eventActor && !!profileActor && eventActor === profileActor
+  }
+
+  function replyToForCommand(command) {
+    const targetId =
+      command.replyTo && typeof command.replyTo === 'object'
+        ? command.replyTo.id
+        : command.replyToId
+    const cleanTargetId = typeof targetId === 'string' ? targetId.trim().slice(0, 96) : ''
+    if (!cleanTargetId) return null
+
+    const target = state.events.find((event) => event.id === cleanTargetId)
+    if (!target || !['chat', 'chat-media'].includes(target.type)) return null
+
+    return replySnapshotForEvent(target)
+  }
+
+  function replySnapshotForEvent(event) {
+    const kind =
+      event.type === 'chat'
+        ? 'chat'
+        : event.payload?.kind === 'image'
+          ? 'image'
+          : event.payload?.kind === 'voice'
+            ? 'voice'
+            : 'media'
+    const text =
+      kind === 'chat'
+        ? event.payload.text
+        : kind === 'image'
+          ? event.payload.caption || 'Photo'
+          : kind === 'voice'
+            ? 'Voice note'
+            : 'Media'
+
+    return {
+      id: event.id.slice(0, 96),
+      kind,
+      sender: String(event.sender || 'Fan')
+        .trim()
+        .slice(0, 24),
+      text: String(text || '')
+        .trim()
+        .slice(0, 120)
+    }
+  }
+
+  function sanitizeReplyTo(value) {
+    if (!value || typeof value !== 'object') return null
+    const id = typeof value.id === 'string' ? value.id.trim().slice(0, 96) : ''
+    if (!id) return null
+
+    const kind = ['chat', 'image', 'voice', 'media'].includes(value.kind) ? value.kind : 'chat'
+    const sender =
+      typeof value.sender === 'string' && value.sender.trim()
+        ? value.sender.trim().slice(0, 24)
+        : 'Fan'
+    const fallback = kind === 'image' ? 'Photo' : kind === 'voice' ? 'Voice note' : 'Message'
+    const text =
+      typeof value.text === 'string' && value.text.trim()
+        ? value.text.trim().slice(0, 120)
+        : fallback
+
+    return {
+      id,
+      kind,
+      sender,
+      text
+    }
   }
 
   function sanitizeEmoji(value) {
@@ -268,9 +359,13 @@ function createTifoRoomState(options = {}) {
     const text = requireString(command.type, command.text, 'text')
     if (!text) return
 
-    addEvent('chat', {
+    const payload = {
       text: text.slice(0, 180)
-    })
+    }
+    const replyTo = replyToForCommand(command)
+    if (replyTo) payload.replyTo = replyTo
+
+    addEvent('chat', payload)
   }
 
   function handleChatEdit(command) {
@@ -388,6 +483,8 @@ function createTifoRoomState(options = {}) {
       sendError(command.type, 'Chat media is not valid')
       return
     }
+    const replyTo = replyToForCommand(command)
+    if (replyTo) payload.replyTo = replyTo
 
     const savedPayload = await onChatMediaSave({
       ...payload,
@@ -485,9 +582,12 @@ function createTifoRoomState(options = {}) {
 
     if (event.type === 'chat') {
       if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
-      return {
+      const cleanPayload = {
         text: payload.text.trim().slice(0, 180)
       }
+      const replyTo = sanitizeReplyTo(payload.replyTo)
+      if (replyTo) cleanPayload.replyTo = replyTo
+      return cleanPayload
     }
 
     if (event.type === 'chat-edit') {
@@ -581,7 +681,7 @@ function createTifoRoomState(options = {}) {
     const width = Number(payload.width)
     const height = Number(payload.height)
 
-    return {
+    const cleanPayload = {
       caption: typeof payload.caption === 'string' ? payload.caption.trim().slice(0, 140) : '',
       clientId: typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : null,
       durationMs:
@@ -595,6 +695,9 @@ function createTifoRoomState(options = {}) {
       size: Math.round(size),
       width: kind === 'image' && Number.isFinite(width) && width > 0 ? Math.round(width) : null
     }
+    const replyTo = sanitizeReplyTo(payload.replyTo)
+    if (replyTo) cleanPayload.replyTo = replyTo
+    return cleanPayload
   }
 
   function sanitizeClipPayload(payload) {

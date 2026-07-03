@@ -70,6 +70,32 @@ export function chatEventTypes() {
   return ['chat', 'chat-media']
 }
 
+export function chatReplySnapshot(event) {
+  if (!event || !chatEventTypes().includes(event.type)) return null
+
+  const id = typeof event.id === 'string' ? event.id.slice(0, 96) : ''
+  if (!id) return null
+
+  const sender =
+    typeof event.sender === 'string' && event.sender.trim() ? event.sender.trim() : 'Fan'
+  const kind =
+    event.type === 'chat'
+      ? 'chat'
+      : event.payload?.kind === 'image'
+        ? 'image'
+        : event.payload?.kind === 'voice'
+          ? 'voice'
+          : 'media'
+  const text = chatReplyText(event, kind)
+
+  return {
+    id,
+    kind,
+    sender: sender.slice(0, 24),
+    text
+  }
+}
+
 export function timelineEventTypes() {
   return ['clip', 'chant', 'reaction']
 }
@@ -214,6 +240,21 @@ function addChatReaction(reactions, targetId, event) {
   })
   targetReactions.set(emoji, emojiReactions)
   reactions.set(targetId, targetReactions)
+}
+
+function chatReplyText(event, kind) {
+  if (kind === 'chat') {
+    return String(event.payload?.text || '')
+      .trim()
+      .slice(0, 120)
+  }
+  if (kind === 'image') {
+    return String(event.payload?.caption || 'Photo')
+      .trim()
+      .slice(0, 120)
+  }
+  if (kind === 'voice') return 'Voice note'
+  return 'Media'
 }
 
 function chatReactionList(targetReactions, profile) {

@@ -43,6 +43,7 @@ export function createInitialState(options = {}) {
     peerCount: 0,
     events: [],
     chatDraft: '',
+    chatReply: null,
     chatMedia: {
       imageError: '',
       imageStatus: 'idle',
