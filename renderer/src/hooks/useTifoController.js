@@ -62,6 +62,7 @@ import {
   parseInvite,
   saveRecentPrivateRoom
 } from '../tifo/invites.js'
+import { availableRooms } from '../tifo/rooms.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
@@ -121,6 +122,33 @@ export function useTifoController() {
 
   function sendWorkerCommand(type, payload = {}) {
     return workerClientRef.current?.send(type, payload)
+  }
+
+  function knownMailboxRooms(state = stateRef.current) {
+    const publicRooms = availableRooms.map((room) => ({
+      code: room.code,
+      kind: 'match',
+      title: room.title
+    }))
+
+    const privateRooms = (state.recentPrivateRooms || []).map((room) => ({
+      code: room.code,
+      invite: room.invite || '',
+      kind: room.kind,
+      title: room.title,
+      topicKey: room.topicKey || ''
+    }))
+
+    return [...publicRooms, ...privateRooms]
+  }
+
+  function syncWorkerMailbox(state = stateRef.current) {
+    if (!state.profile) return
+    sendWorkerCommand('profile:set', { profile: state.profile })
+    sendWorkerCommand('mailbox:known', {
+      profile: state.profile,
+      rooms: knownMailboxRooms(state)
+    })
   }
 
   function resolvePendingChantLoad(eventId, dataUrl = '') {
@@ -468,6 +496,7 @@ export function useTifoController() {
           syncStatus: message.syncStatus || 'Worker ready',
           lastError: ''
         }))
+        syncWorkerMailbox()
         break
       case 'app:worker-exit':
         setAppState((state) => ({
@@ -481,6 +510,9 @@ export function useTifoController() {
           ...state,
           appPeerCount: Number.isFinite(message.count) ? message.count : state.appPeerCount
         }))
+        break
+      case 'mailbox:conversation':
+        if (message.room) rememberPrivateRoom(message.room)
         break
       case 'room:joined':
         setAppState((state) => ({
@@ -1644,6 +1676,7 @@ export function useTifoController() {
         view: 'home'
       }))
       sendWorkerCommand('profile:set', { profile })
+      syncWorkerMailbox()
     } catch (err) {
       setAppState((state) => ({
         ...state,
@@ -1661,6 +1694,10 @@ export function useTifoController() {
       ...state,
       recentPrivateRooms
     }))
+    syncWorkerMailbox({
+      ...stateRef.current,
+      recentPrivateRooms
+    })
   }
 
   function createPrivateGroup(input = {}) {

@@ -85,7 +85,10 @@ button {
 }
 
 .home-view {
+  align-items: start;
   grid-template-columns: minmax(330px, 0.52fr) minmax(0, 1fr);
+  overflow: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .conversation-view {

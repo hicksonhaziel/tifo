@@ -23,7 +23,7 @@ export function createDmInvite(input = {}) {
   const now = Date.now()
   const roomId = randomToken(10)
   const topicKey = randomHex(32)
-  const title = handle ? `DM with @${handle}` : cleanTitle(input.title) || 'Direct message'
+  const title = handle ? `@${handle}` : cleanTitle(input.title) || 'Direct message'
 
   return {
     code: `DM-${roomId}`,
@@ -51,7 +51,7 @@ export async function createDmInviteForPeer(input = {}) {
   const pair = [localKey, peerKey].sort().join(':')
   const topicKey = await sha256Hex(`tifo-dm:v1:${pair}`)
   const handle = cleanHandle(peer.username || peer.name)
-  const title = handle ? `DM with @${handle}` : `DM with ${cleanTitle(peer.name) || 'fan'}`
+  const title = handle ? `@${handle}` : cleanTitle(peer.name) || 'Direct message'
 
   return {
     code: `DM-${topicKey.slice(0, 20).toUpperCase()}`,

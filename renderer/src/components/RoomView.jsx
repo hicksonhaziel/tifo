@@ -58,7 +58,7 @@ export function RoomView({ controller }) {
               <span aria-hidden='true'></span>
               {offlineActive ? 'Offline' : connected ? 'Live' : 'Seeking peers'}
             </span>
-            {state.roomInvite ? (
+            {state.roomInvite && state.roomKind !== 'dm' ? (
               <button
                 className='ghost-action inline-flex items-center justify-center gap-2'
                 type='button'
@@ -126,7 +126,7 @@ export function RoomView({ controller }) {
             <span aria-hidden='true'></span>
             {offlineActive ? 'Offline mode' : connected ? 'P2P live' : 'Seeking peers'}
           </span>
-          {state.roomInvite ? (
+          {state.roomInvite && state.roomKind !== 'dm' ? (
             <button
               className='ghost-action inline-flex items-center justify-center gap-2'
               type='button'

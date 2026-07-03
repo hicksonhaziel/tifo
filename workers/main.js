@@ -11,6 +11,7 @@ const fs = require('bare-fs')
 const b4a = require('b4a')
 const { TifoEchoTimeline } = require('./tifo-echo-timeline')
 const { TifoEventLog } = require('./tifo-event-log')
+const { TifoMailbox } = require('./tifo-mailbox')
 const { createTifoRoomState } = require('./tifo-room-state')
 
 const pipe = new FramedStream(Bare.IPC)
@@ -51,6 +52,7 @@ function send(type, payload = {}) {
 const roomPeers = new Map()
 const appPeers = new Map()
 const appPresenceTopic = crypto.namespace('tifo-app-presence:v1', 1)[0]
+const appControlProtocol = 'tifo-app-mailbox-v1'
 const roomControlProtocol = 'tifo-room-control-v1'
 const chantMaxBytes = 2 * 1024 * 1024
 const chatVoiceMaxBytes = 5 * 1024 * 1024
@@ -63,9 +65,13 @@ let echoRefreshInterval = null
 const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
 const chatMediaDir = path.join(updaterConfig.dir, 'tifo-chat-media')
 const clipDir = path.join(updaterConfig.dir, 'tifo-clips')
+const mailbox = new TifoMailbox({
+  dir: path.join(updaterConfig.dir, 'tifo-mailbox')
+})
 const pendingChantRequests = new Map()
 const pendingChatMediaRequests = new Map()
 const pendingClipRequests = new Map()
+const announcedMailboxRooms = new Set()
 const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 const pendingSyncEventIds = new Set()
@@ -236,6 +242,7 @@ function closeAppPeer(peer) {
   if (peer.closed) return
   peer.closed = true
   appPeers.delete(peer.id)
+  if (peer.channel) peer.channel.close()
   peer.connection.destroy()
   sendAppPeerStatus()
 }
@@ -248,10 +255,42 @@ function handleAppConnection(connection, peerInfo) {
   const peer = {
     id,
     connection,
+    channel: null,
+    controlMessage: null,
     closed: false
   }
 
+  const mux = Protomux.from(connection)
+  peer.channel = mux.createChannel({
+    protocol: appControlProtocol,
+    onopen() {
+      sendAppIdentity(peer)
+      sendMailboxWant(peer)
+    },
+    onclose() {
+      closeAppPeer(peer)
+    }
+  })
+
+  if (!peer.channel) {
+    connection.destroy()
+    return
+  }
+
+  peer.controlMessage = peer.channel.addMessage({
+    encoding: c.json,
+    onmessage(message) {
+      handleAppPeerMessage(peer, message).catch((err) => {
+        send('error', {
+          command: 'app-peer:message',
+          message: err.message || 'Could not handle app peer message'
+        })
+      })
+    }
+  })
+
   appPeers.set(id, peer)
+  peer.channel.open()
   connection.on('close', () => closeAppPeer(peer))
   sendAppPeerStatus()
 }
@@ -266,6 +305,57 @@ function startAppPresence() {
     .flushed()
     .then(sendAppPeerStatus)
     .catch(() => {})
+}
+
+function sendAppPeer(peer, message) {
+  if (simulatedOffline || peer.closed || !peer.controlMessage) return
+  peer.controlMessage.send(message)
+}
+
+function sendAppIdentity(peer) {
+  const profile = roomState.state.profile
+  if (!profile?.publicKey) return
+
+  sendAppPeer(peer, {
+    type: 'app:identity',
+    profile
+  })
+}
+
+function sendMailboxWant(peer) {
+  const topicHashes = mailbox.knownTopicHashes()
+  if (topicHashes.length === 0) return
+
+  sendAppPeer(peer, {
+    type: 'mailbox:want',
+    knownIds: mailbox.envelopeIdsForTopics(topicHashes),
+    topicHashes
+  })
+}
+
+function sendMailboxEnvelopes(peer, envelopes) {
+  for (let index = 0; index < envelopes.length; index += 20) {
+    sendAppPeer(peer, {
+      envelopes: envelopes.slice(index, index + 20),
+      type: 'mailbox:envelopes'
+    })
+  }
+}
+
+function broadcastAppIdentity() {
+  for (const peer of appPeers.values()) sendAppIdentity(peer)
+}
+
+function broadcastMailboxWant() {
+  for (const peer of appPeers.values()) sendMailboxWant(peer)
+}
+
+function broadcastMailboxEnvelope(envelope, exceptPeerId = null) {
+  if (!envelope) return
+  for (const peer of appPeers.values()) {
+    if (peer.id === exceptPeerId) continue
+    sendMailboxEnvelopes(peer, [envelope])
+  }
 }
 
 function sendPeer(peer, message) {
@@ -454,17 +544,31 @@ function persistEvent(event) {
 }
 
 async function handleJoinRoom(room) {
+  await mailbox.rememberRooms([room])
+  broadcastMailboxWant()
+
   const storedEvents = await echoTimeline.openRoom(room.code, {
     onUpdate: handleEchoTimelineUpdate
   })
   const migratedEvents = await migrateLegacyRoomEvents(room, storedEvents)
+  const mailboxEvents = await mailbox.eventsForRoom(room)
+  const seen = new Set(migratedEvents.map((event) => event.id))
+  for (const event of mailboxEvents) {
+    if (seen.has(event.id)) continue
+    seen.add(event.id)
+    await echoTimeline.append(event)
+  }
+  const mergedEvents = mailboxEvents.length > 0 ? await echoTimeline.readAll() : migratedEvents
+  for (const event of mergedEvents) mailbox.rememberContactFromEvent(event)
+  await mailbox.persist().catch(() => {})
+
   if (simulatedOffline) {
     send('sync:status', { status: 'Offline mode: local only' })
     sendOfflineState()
   } else {
     joinRoomNetwork(room)
   }
-  return migratedEvents
+  return mergedEvents
 }
 
 async function handleLeaveRoom() {
@@ -479,6 +583,7 @@ async function handleLeaveRoom() {
 
 function handleLocalEvent(event) {
   persistEvent(event)
+  relayMailboxEvent(event).catch(() => {})
 
   if (simulatedOffline || roomPeers.size === 0) {
     queuePendingSync(event)
@@ -490,6 +595,7 @@ function handleLocalEvent(event) {
 
 function handleRemoteEvent(event) {
   persistEvent(event)
+  relayMailboxEvent(event).catch(() => {})
 }
 
 function handleEchoTimelineUpdate(events) {
@@ -588,6 +694,22 @@ async function setSimulatedOffline(enabled) {
   }
 
   sendOfflineState()
+}
+
+async function handleProfileSet(command) {
+  await mailbox.setProfile(command.profile)
+  await roomState.handleCommand(command)
+  broadcastAppIdentity()
+  broadcastMailboxWant()
+}
+
+async function handleMailboxKnown(command) {
+  if (command.profile) await mailbox.setProfile(command.profile)
+  const rooms = Array.isArray(command.rooms) ? command.rooms : []
+  const topicHashes = await mailbox.setKnownRooms(rooms)
+  await processKnownMailboxRecords(topicHashes).catch(() => {})
+  broadcastAppIdentity()
+  broadcastMailboxWant()
 }
 
 async function migrateLegacyRoomEvents(room, storedEvents) {
@@ -724,7 +846,7 @@ async function handleChatMediaSave(command) {
   const width = Number(command.width)
   const height = Number(command.height)
 
-  return {
+  const savedPayload = {
     caption: typeof command.caption === 'string' ? command.caption.trim().slice(0, 140) : '',
     clientId:
       typeof command.clientId === 'string' && command.clientId.trim()
@@ -741,6 +863,9 @@ async function handleChatMediaSave(command) {
     size: data.byteLength,
     width: kind === 'image' && Number.isFinite(width) && width > 0 ? Math.round(width) : null
   }
+
+  await relayMailboxChatMedia(savedPayload, data).catch(() => {})
+  return savedPayload
 }
 
 async function handleClipSave(command) {
@@ -1128,6 +1253,24 @@ async function handleChatMediaLoad(command) {
       size: data.byteLength
     })
   } catch {
+    const mailboxData = await restoreMailboxChatMedia({
+      kind,
+      mediaRef,
+      mimeType,
+      room
+    }).catch(() => null)
+    if (mailboxData) {
+      sendLoadedChatMedia({
+        data: mailboxData,
+        eventId: command.eventId,
+        kind,
+        mediaRef,
+        mimeType,
+        size: mailboxData.byteLength
+      })
+      return
+    }
+
     requestRemoteChatMedia({
       eventId: command.eventId.slice(0, 96),
       kind,
@@ -1535,6 +1678,149 @@ async function handlePeerClipDataEnd(message) {
   })
 }
 
+async function relayMailboxEvent(event) {
+  const room = roomState.state.room
+  if (!room || !event) return
+
+  mailbox.rememberContactFromEvent(event)
+  const envelope = await mailbox.createEventEnvelope(room, event)
+  if (envelope) broadcastMailboxEnvelope(envelope)
+}
+
+async function relayMailboxChatMedia(payload, data) {
+  const room = roomState.state.room
+  if (!room || !payload || !data?.byteLength) return
+
+  const envelope = await mailbox.createChatMediaEnvelope(room, payload, data)
+  if (envelope) broadcastMailboxEnvelope(envelope)
+}
+
+async function cacheMailboxChatMedia(record) {
+  const room = record.room
+  const media = record.payload.media
+  if (!room || !media) return false
+
+  const kind = media.kind === 'image' ? 'image' : media.kind === 'voice' ? 'voice' : null
+  if (!kind) return false
+  if (typeof media.bytesBase64 !== 'string') return false
+
+  const data = b4a.from(media.bytesBase64, 'base64')
+  if (data.byteLength < 1 || data.byteLength > chatMediaMaxBytes(kind)) return false
+  if (Number.isFinite(media.size) && media.size !== data.byteLength) return false
+
+  const mediaRef = safeFilePart(media.mediaRef || '')
+  if (!mediaRef) return false
+  const mimeType =
+    typeof media.mimeType === 'string' && media.mimeType.trim()
+      ? media.mimeType.trim().slice(0, 80)
+      : kind === 'image'
+        ? 'image/jpeg'
+        : 'audio/webm'
+
+  await fs.mkdir(chatMediaRoomDir(room.code), { recursive: true })
+  await fs.writeFile(chatMediaFilePath(room.code, mediaRef, kind, mimeType), data)
+  return true
+}
+
+async function restoreMailboxChatMedia({ kind, mediaRef, mimeType, room }) {
+  const topicHash = mailbox.topicHashForRoom(room)
+  if (!topicHash) return null
+
+  const records = await mailbox.decryptKnownEnvelopes([topicHash])
+  for (const record of records) {
+    const media = record.payload.media
+    if (record.payload.kind !== 'chat-media') continue
+    if (media?.kind !== kind) continue
+    if (safeFilePart(media.mediaRef || '') !== mediaRef) continue
+
+    const cached = await cacheMailboxChatMedia(record).catch(() => false)
+    if (!cached) continue
+    const { data } = await loadLocalChatMedia(room.code, mediaRef, kind, mimeType)
+    return data
+  }
+
+  return null
+}
+
+async function processMailboxRecord(record) {
+  if (!record?.payload || !record.room) return
+
+  if (record.payload.kind === 'chat-media') {
+    await cacheMailboxChatMedia(record).catch(() => false)
+    return
+  }
+
+  if (record.payload.kind !== 'event') return
+  const event = record.payload.event
+  if (!event?.id) return
+
+  mailbox.rememberContactFromEvent(event)
+  announceMailboxConversation(record.room)
+  if (roomState.state.room?.code !== event.room) return
+
+  roomState.addRemoteEvent(event)
+}
+
+function announceMailboxConversation(room) {
+  if (!room || !['group', 'dm'].includes(room.kind)) return
+  const key = `${room.kind}:${room.code}`
+  if (announcedMailboxRooms.has(key)) return
+  announcedMailboxRooms.add(key)
+
+  send('mailbox:conversation', {
+    room: {
+      code: room.code,
+      invite: room.invite || '',
+      kind: room.kind,
+      title: room.title,
+      topicKey: room.topicKey
+    }
+  })
+}
+
+async function processKnownMailboxRecords(topicHashes = mailbox.knownTopicHashes()) {
+  const records = await mailbox.decryptKnownEnvelopes(topicHashes)
+  for (const record of records) await processMailboxRecord(record)
+}
+
+async function handleAppPeerMessage(peer, message) {
+  if (simulatedOffline) return
+  if (!message || typeof message !== 'object') return
+
+  if (message.type === 'app:identity') {
+    const contact = mailbox.rememberContact(message.profile)
+    if (contact) {
+      await mailbox.persist()
+      sendMailboxWant(peer)
+      broadcastMailboxWant()
+    }
+    return
+  }
+
+  if (message.type === 'mailbox:want') {
+    const topicHashes = Array.isArray(message.topicHashes) ? message.topicHashes : []
+    const knownIds = Array.isArray(message.knownIds) ? message.knownIds : []
+    const envelopes = mailbox.envelopesForTopics(topicHashes, knownIds)
+    if (envelopes.length > 0) sendMailboxEnvelopes(peer, envelopes)
+    return
+  }
+
+  if (message.type === 'mailbox:envelopes') {
+    const envelopes = Array.isArray(message.envelopes) ? message.envelopes : []
+    const addedEnvelopes = []
+
+    for (const envelope of envelopes) {
+      const added = await mailbox.storeEnvelope(envelope)
+      if (!added) continue
+      addedEnvelopes.push(envelope)
+      const record = mailbox.decryptEnvelope(envelope)
+      if (record) await processMailboxRecord(record)
+    }
+
+    for (const envelope of addedEnvelopes) broadcastMailboxEnvelope(envelope, peer.id)
+  }
+}
+
 async function handlePeerMessage(peer, message) {
   const room = roomState.state.room
   if (simulatedOffline) return
@@ -1866,6 +2152,16 @@ pipe.on('data', async (data) => {
   }
 
   try {
+    if (command.type === 'profile:set') {
+      await handleProfileSet(command)
+      return
+    }
+
+    if (command.type === 'mailbox:known') {
+      await handleMailboxKnown(command)
+      return
+    }
+
     if (command.type === 'offline:set') {
       await setSimulatedOffline(command.enabled)
       return
