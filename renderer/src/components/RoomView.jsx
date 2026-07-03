@@ -208,6 +208,7 @@ export function RoomView({ controller }) {
         metrics={metrics}
         offline={state.offline}
         peerCount={state.peerCount}
+        syncDiagnostics={state.syncDiagnostics}
       />
 
       {state.lastError ? (

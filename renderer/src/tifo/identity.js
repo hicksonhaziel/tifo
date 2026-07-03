@@ -66,10 +66,8 @@ function sanitizeStoredProfile(profile) {
   const username = normalizeUsername(profile.username || profile.nickname || profile.displayName)
   if (!validUsername(username)) return null
 
-  const publicKey =
-    typeof profile.publicKey === 'string' && /^[0-9a-f]{64}$/i.test(profile.publicKey)
-      ? profile.publicKey.toLowerCase()
-      : randomHex(32)
+  const identityPublicKey = cleanPublicKey(profile.identityPublicKey || profile.publicKey)
+  const publicKey = cleanPublicKey(profile.publicKey) || identityPublicKey || randomHex(32)
 
   const userId =
     typeof profile.userId === 'string' && /^[a-z0-9_-]{6,48}$/i.test(profile.userId)
@@ -78,13 +76,29 @@ function sanitizeStoredProfile(profile) {
 
   return {
     createdAt: Number.isFinite(profile.createdAt) ? profile.createdAt : Date.now(),
+    deviceProof: cleanProof(profile.deviceProof),
+    devicePublicKey: cleanPublicKey(profile.devicePublicKey),
     displayName: username,
+    identityPublicKey,
+    profileDiscoveryPublicKey: cleanPublicKey(profile.profileDiscoveryPublicKey),
+    profileProof: cleanProof(profile.profileProof),
     publicKey,
     updatedAt: Number.isFinite(profile.updatedAt) ? profile.updatedAt : Date.now(),
     userId,
+    verified: profile.verified === true,
     username,
-    version: 1
+    version: Number.isFinite(profile.version) ? profile.version : 1
   }
+}
+
+function cleanPublicKey(value) {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return /^[0-9a-f]{64}$/.test(key) ? key : ''
+}
+
+function cleanProof(value) {
+  const proof = typeof value === 'string' ? value.trim() : ''
+  return proof && proof.length <= 4096 ? proof : ''
 }
 
 function randomHex(byteLength) {

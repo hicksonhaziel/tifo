@@ -6,6 +6,7 @@ import {
   Pencil,
   Reply,
   Send,
+  ShieldCheck,
   SmilePlus,
   StopCircle,
   Trash2,
@@ -15,7 +16,13 @@ import { useEffect, useRef, useState } from 'react'
 import 'emoji-picker-element'
 import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
 
-import { eventStatus, eventStatusLabel, materializeChatEvents } from '../tifo/domain.js'
+import {
+  eventStatus,
+  eventStatusLabel,
+  eventTrustLabel,
+  materializeChatEvents,
+  readReceiptLabel
+} from '../tifo/domain.js'
 import { formatBytes, formatDuration, formatTime } from '../tifo/format.js'
 
 export function ChatPanel({
@@ -147,6 +154,7 @@ export function ChatPanel({
           state={state}
         />
       </div>
+      <TypingIndicator state={state} />
       {emojiOpen && emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
       {state.chatReply ? (
         <ChatReplyPreview
@@ -258,6 +266,24 @@ function ChatMediaStatus({ state }) {
   )
 }
 
+function TypingIndicator({ state }) {
+  const users = state.typingUsers
+    .filter((item) => item.expiresAt > Date.now())
+    .map((item) => item.user.displayName || item.user.username || 'Fan')
+    .slice(0, 3)
+
+  if (users.length === 0) return null
+
+  const label =
+    users.length === 1
+      ? `${users[0]} is typing...`
+      : users.length === 2
+        ? `${users[0]} and ${users[1]} are typing...`
+        : `${users[0]}, ${users[1]}, and ${users.length - 2} more are typing...`
+
+  return <p className='typing-indicator'>{label}</p>
+}
+
 function ChatItems({
   actions,
   allowFanDm,
@@ -297,6 +323,13 @@ function ChatItems({
             <strong>{event.sender}</strong>
           )}
           <span>{formatTime(event.timestamp)}</span>
+          <span
+            className={`verified-sender-badge ${event.verified ? 'verified' : 'unverified'}`}
+            title={eventTrustLabel(event)}
+          >
+            <ShieldCheck size={12} strokeWidth={2.5} />
+            {event.verified ? 'Signed' : 'Legacy'}
+          </span>
         </div>
         {activeFanId === event.id ? (
           <div className='chat-profile-popover'>
@@ -335,7 +368,9 @@ function ChatItems({
           reactions={event.chatState?.reactions || []}
         />
         <div className='chat-message-footer'>
-          <span className={`message-status ${status}`}>{eventStatusLabel(event, state)}</span>
+          <span className={`message-status ${status}`}>
+            {readReceiptLabel(event, state) || eventStatusLabel(event, state)}
+          </span>
           <div className='chat-message-actions'>
             <button
               className='chat-inline-action'

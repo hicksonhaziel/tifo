@@ -13,6 +13,7 @@
   "scripts": {
     "build:renderer": "vite build",
     "lint": "prettier --check . && lunte",
+    "smoke:two-window": "node scripts/smoke-two-window.cjs",
     "format": "prettier --write . && lunte --fix",
     "start": "npm run build:renderer && electron-forge start -- --no-updates",
     "package": "npm run build:renderer && electron-forge package",
@@ -29,6 +30,7 @@
     "framer-motion": "^12.42.2",
     "graceful-goodbye": "^1.3.3",
     "hyperswarm": "^4.17.0",
+    "keet-identity-key": "^3.2.0",
     "lucide-react": "^1.23.0",
     "paparam": "^1.10.0",
     "pear-runtime": "^1.1.4",

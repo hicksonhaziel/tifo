@@ -13,6 +13,10 @@ const { TifoEchoTimeline } = require('./tifo-echo-timeline')
 const { TifoEventLog } = require('./tifo-event-log')
 const { TifoMailbox } = require('./tifo-mailbox')
 const { createTifoRoomState } = require('./tifo-room-state')
+const { TifoIdentity } = require('./tifo-identity')
+const { createConversationState } = require('./tifo-conversations')
+const { createSyncDiagnostics } = require('./tifo-sync-diagnostics')
+const { transferSnapshot } = require('./tifo-attachments')
 
 const pipe = new FramedStream(Bare.IPC)
 
@@ -65,9 +69,13 @@ let echoRefreshInterval = null
 const chantDir = path.join(updaterConfig.dir, 'tifo-chants')
 const chatMediaDir = path.join(updaterConfig.dir, 'tifo-chat-media')
 const clipDir = path.join(updaterConfig.dir, 'tifo-clips')
+const identity = new TifoIdentity({
+  dir: path.join(updaterConfig.dir, 'tifo-identity')
+})
 const mailbox = new TifoMailbox({
   dir: path.join(updaterConfig.dir, 'tifo-mailbox')
 })
+const conversations = createConversationState()
 const pendingChantRequests = new Map()
 const pendingChatMediaRequests = new Map()
 const pendingClipRequests = new Map()
@@ -78,6 +86,7 @@ const pendingSyncEventIds = new Set()
 const inflightSyncEventIds = new Set()
 let simulatedOffline = false
 let lastPendingFlushCount = 0
+let lastSyncAt = null
 
 const roomState = createTifoRoomState({
   send,
@@ -87,7 +96,9 @@ const roomState = createTifoRoomState({
   onChatMediaSave: handleChatMediaSave,
   onClipSave: handleClipSave,
   onLocalEvent: handleLocalEvent,
-  onRemoteEvent: handleRemoteEvent
+  onRemoteEvent: handleRemoteEvent,
+  signEvent: (event) => identity.signEvent(event),
+  verifyEvent: (event) => identity.verifyEvent(event)
 })
 
 function topicForRoom(room) {
@@ -114,6 +125,24 @@ function normalizeKeyHex(key) {
 
 function chooseBaseKey(leftKey, rightKey) {
   return leftKey < rightKey ? leftKey : rightKey
+}
+
+function publicProfilesEqual(left, right) {
+  if (!left || !right) return false
+  return (
+    left.publicKey === right.publicKey &&
+    left.devicePublicKey === right.devicePublicKey &&
+    left.profileProof === right.profileProof &&
+    left.username === right.username
+  )
+}
+
+async function ensureWorkerProfile(profileInput, options = {}) {
+  const profile = await identity.ensureProfile(profileInput || roomState.state.profile)
+  if (options.announce !== false && !publicProfilesEqual(profileInput, profile)) {
+    send('profile:ready', { profile })
+  }
+  return profile
 }
 
 function safeFilePart(value) {
@@ -228,6 +257,27 @@ function sendOfflineState(payload = {}) {
 
 function sendAppPeerStatus() {
   send('app-peer:count', { count: appPeers.size })
+  sendSyncDiagnostics('app peers changed')
+}
+
+function sendSyncDiagnostics(reason = '') {
+  send('sync:diagnostics', {
+    diagnostics: createSyncDiagnostics({
+      appPeers,
+      inflightEventIds: Array.from(inflightSyncEventIds),
+      lastSyncAt,
+      mailboxTopicHashes: mailbox.knownTopicHashes(),
+      pendingEventIds: Array.from(pendingSyncEventIds),
+      pendingTransfers: transferSnapshot({
+        chants: pendingChantRequests,
+        chatMedia: pendingChatMediaRequests,
+        clips: pendingClipRequests
+      }),
+      roomPeers,
+      roomTopic: roomTopic ? b4a.toString(roomTopic, 'hex') : ''
+    }),
+    reason
+  })
 }
 
 function queuePendingSync(event) {
@@ -506,6 +556,7 @@ function updateRoomPeerStatus() {
       count === 0 ? 'Searching for peers' : `P2P connected: ${count} peer${count === 1 ? '' : 's'}`
   })
   flushPendingSyncEvents()
+  sendSyncDiagnostics('room peers changed')
 }
 
 function startEchoRefresh() {
@@ -533,7 +584,9 @@ function persistEvent(event) {
     .append(event)
     .then(async () => {
       await echoTimeline.refresh()
+      lastSyncAt = Date.now()
       nudgePeersToRefresh()
+      sendSyncDiagnostics('event persisted')
     })
     .catch((err) => {
       send('error', {
@@ -697,19 +750,64 @@ async function setSimulatedOffline(enabled) {
 }
 
 async function handleProfileSet(command) {
-  await mailbox.setProfile(command.profile)
-  await roomState.handleCommand(command)
+  const profile = await ensureWorkerProfile(command.profile)
+  await mailbox.setProfile(profile)
+  await roomState.handleCommand({ ...command, profile })
   broadcastAppIdentity()
   broadcastMailboxWant()
+  sendSyncDiagnostics('profile ready')
 }
 
 async function handleMailboxKnown(command) {
-  if (command.profile) await mailbox.setProfile(command.profile)
+  if (command.profile) {
+    const profile = await ensureWorkerProfile(command.profile)
+    await mailbox.setProfile(profile)
+  }
   const rooms = Array.isArray(command.rooms) ? command.rooms : []
   const topicHashes = await mailbox.setKnownRooms(rooms)
   await processKnownMailboxRecords(topicHashes).catch(() => {})
   broadcastAppIdentity()
   broadcastMailboxWant()
+  sendSyncDiagnostics('mailbox known')
+}
+
+async function requestSyncNow(reason = 'manual sync') {
+  await echoTimeline.refresh().catch(() => {})
+  await processKnownMailboxRecords().catch(() => {})
+  sendAllPeerSnapshots()
+  broadcastMailboxWant()
+  nudgePeersToRefresh()
+  lastSyncAt = Date.now()
+  sendSyncDiagnostics(reason)
+  send('sync:status', {
+    status:
+      roomPeers.size > 0
+        ? `Sync requested across ${roomPeers.size} peer${roomPeers.size === 1 ? '' : 's'}`
+        : 'Sync requested: searching for peers'
+  })
+}
+
+function broadcastConversationMessage(message, exceptPeerId = null) {
+  if (!message) return
+  for (const peer of roomPeers.values()) {
+    if (peer.id === exceptPeerId) continue
+    sendPeer(peer, message)
+  }
+}
+
+function handleTypingCommand(command) {
+  const message = conversations.typingMessage(
+    roomState.state.room,
+    roomState.state.profile,
+    command.type !== 'typing:stop'
+  )
+  broadcastConversationMessage(message)
+}
+
+function handleRoomRead(command) {
+  const readAt = Number.isFinite(command.readAt) ? command.readAt : Date.now()
+  const message = conversations.readMessage(roomState.state.room, roomState.state.profile, readAt)
+  broadcastConversationMessage(message)
 }
 
 async function migrateLegacyRoomEvents(room, storedEvents) {
@@ -1759,7 +1857,11 @@ async function processMailboxRecord(record) {
   announceMailboxConversation(record.room, event)
   if (roomState.state.room?.code !== event.room) return
 
-  roomState.addRemoteEvent(event)
+  const added = roomState.addRemoteEvent(event)
+  if (added) {
+    lastSyncAt = Date.now()
+    sendSyncDiagnostics('mailbox event restored')
+  }
 }
 
 function announceMailboxConversation(room, event = null) {
@@ -1779,6 +1881,7 @@ function announceMailboxConversation(room, event = null) {
       : ''
 
   send('mailbox:conversation', {
+    event,
     room: {
       code: room.code,
       invite: room.invite || '',
@@ -1871,8 +1974,26 @@ async function handlePeerMessage(peer, message) {
 
   if (message.type === 'echo:refresh') {
     await echoTimeline.refresh()
+    lastSyncAt = Date.now()
     sendPeerSnapshot(peer)
     sendPeerEventSnapshot(peer)
+    sendSyncDiagnostics('peer refresh')
+    return
+  }
+
+  if (message.type === 'typing:start' || message.type === 'typing:stop') {
+    const update = conversations.cleanTyping(message)
+    if (update && update.user.publicKey !== roomState.state.profile.publicKey) {
+      send('typing:update', update)
+    }
+    return
+  }
+
+  if (message.type === 'read:state') {
+    const update = conversations.cleanRead(message)
+    if (update && update.user.publicKey !== roomState.state.profile.publicKey) {
+      send('read:update', update)
+    }
     return
   }
 
@@ -1895,9 +2016,11 @@ async function handlePeerMessage(peer, message) {
 
     if (addedCount > 0) {
       await echoTimeline.refresh()
+      lastSyncAt = Date.now()
       send('sync:status', {
         status: `P2P caught up: ${addedCount} event${addedCount === 1 ? '' : 's'}`
       })
+      sendSyncDiagnostics('snapshot received')
     }
     return
   }
@@ -1911,7 +2034,11 @@ async function handlePeerMessage(peer, message) {
         eventId
       })
     }
-    if (addedEvent) broadcastRoomEvent(addedEvent, peer.id)
+    if (addedEvent) {
+      lastSyncAt = Date.now()
+      broadcastRoomEvent(addedEvent, peer.id)
+      sendSyncDiagnostics('event received')
+    }
   }
 
   if (message.type === 'event:ack') {
@@ -2189,6 +2316,26 @@ pipe.on('data', async (data) => {
       return
     }
 
+    if (command.type === 'typing:start' || command.type === 'typing:stop') {
+      handleTypingCommand(command)
+      return
+    }
+
+    if (command.type === 'room:read') {
+      handleRoomRead(command)
+      return
+    }
+
+    if (command.type === 'sync:diagnostics') {
+      sendSyncDiagnostics('manual diagnostics')
+      return
+    }
+
+    if (command.type === 'sync:request' || command.type === 'sync:recover') {
+      await requestSyncNow(command.type === 'sync:recover' ? 'manual recovery' : 'manual sync')
+      return
+    }
+
     if (command.type === 'chant:load') {
       await handleChantLoad(command)
       return
@@ -2201,6 +2348,16 @@ pipe.on('data', async (data) => {
 
     if (command.type === 'clip:load') {
       await handleClipLoad(command)
+      return
+    }
+
+    if (command.type === 'room:join') {
+      const profile = await ensureWorkerProfile(command.profile || roomState.state.profile)
+      await mailbox.setProfile(profile)
+      await roomState.handleCommand({ ...command, profile })
+      broadcastAppIdentity()
+      broadcastMailboxWant()
+      sendSyncDiagnostics('room joined')
       return
     }
 
@@ -2217,3 +2374,4 @@ send('app:ready', {
   appPeerCount: appPeers.size,
   syncStatus: 'Worker ready'
 })
+sendSyncDiagnostics('worker ready')

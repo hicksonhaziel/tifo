@@ -101,11 +101,18 @@ export function timelineEventTypes() {
 }
 
 export function actorKeyForEvent(event) {
-  return event?.senderKey || event?.senderId || event?.sender || ''
+  return event?.senderIdentityKey || event?.senderKey || event?.senderId || event?.sender || ''
 }
 
 export function actorKeyForProfile(profile) {
-  return profile?.publicKey || profile?.userId || profile?.displayName || profile?.username || ''
+  return (
+    profile?.identityPublicKey ||
+    profile?.publicKey ||
+    profile?.userId ||
+    profile?.displayName ||
+    profile?.username ||
+    ''
+  )
 }
 
 export function isOwnEvent(event, profile) {
@@ -198,6 +205,27 @@ export function eventStatusLabel(event, appState) {
   if (status === 'remote') return 'Peer'
   if (status === 'stored') return 'Synced'
   return 'Local'
+}
+
+export function eventTrustLabel(event) {
+  return event?.verified === true ? 'Verified' : 'Unverified'
+}
+
+export function readReceiptLabel(event, appState) {
+  if (!isOwnEvent(event, appState.profile)) return ''
+  const roomReceipts = appState.readReceipts?.[event.room] || {}
+  const profileActor = actorKeyForProfile(appState.profile)
+  const readers = Object.values(roomReceipts).filter(
+    (receipt) =>
+      receipt?.publicKey &&
+      receipt.publicKey !== profileActor &&
+      Number.isFinite(receipt.readAt) &&
+      receipt.readAt >= event.timestamp
+  )
+
+  if (readers.length === 1) return 'Seen'
+  if (readers.length > 1) return `Seen by ${readers.length}`
+  return ''
 }
 
 export function roomMetrics(appState) {

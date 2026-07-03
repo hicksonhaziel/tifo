@@ -40,10 +40,32 @@ export function createInitialState(options = {}) {
     recentPrivateRooms: options.recentPrivateRooms || [],
     workerStatus: 'starting',
     syncStatus: 'Waiting for worker',
+    syncDiagnostics: {
+      appPeers: 0,
+      inflightEvents: 0,
+      knownMailboxTopics: 0,
+      lastSyncAt: null,
+      mailboxTopicPreview: [],
+      pendingEvents: 0,
+      pendingTransfers: {
+        chants: 0,
+        chatMedia: 0,
+        clips: 0
+      },
+      roomPeers: 0,
+      roomTopic: '',
+      timestamp: null
+    },
     peerCount: 0,
     events: [],
     chatDraft: '',
     chatReply: null,
+    notifications: {
+      items: [],
+      unreadCount: 0
+    },
+    readReceipts: {},
+    typingUsers: [],
     chatMedia: {
       imageError: '',
       imageStatus: 'idle',

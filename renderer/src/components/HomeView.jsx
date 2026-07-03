@@ -1,8 +1,19 @@
-import { Copy, DoorOpen, KeyRound, MessageCircle, Plus, RadioTower, Search } from 'lucide-react'
+import {
+  Bell,
+  CheckCircle2,
+  Copy,
+  DoorOpen,
+  KeyRound,
+  MessageCircle,
+  Plus,
+  RadioTower,
+  Search
+} from 'lucide-react'
 import { useState } from 'react'
 
 import { profileLabel, shortProfileKey } from '../tifo/identity.js'
 import { roomInviteLabel } from '../tifo/invites.js'
+import { unreadCountForRoom } from '../tifo/notifications.js'
 import { availableRooms } from '../tifo/rooms.js'
 
 export function HomeView({ actions, state }) {
@@ -55,6 +66,15 @@ export function HomeView({ actions, state }) {
     }
   }
 
+  function openNotification(item) {
+    const privateRoom = state.recentPrivateRooms.find((room) => room.code === item.roomCode)
+    if (privateRoom) {
+      actions.joinRoom({ room: privateRoom })
+      return
+    }
+    actions.joinRoom({ roomCode: item.roomCode })
+  }
+
   return (
     <main className='home-view'>
       <section className='brand-panel home-identity-panel' aria-labelledby='home-title'>
@@ -80,6 +100,12 @@ export function HomeView({ actions, state }) {
             <strong>{profileLabel(profile)}</strong>
             <small>{shortProfileKey(profile)}</small>
           </div>
+          {profile?.verified ? (
+            <span className='verified-profile-pill'>
+              <CheckCircle2 size={14} strokeWidth={2.4} />
+              Verified
+            </span>
+          ) : null}
         </div>
 
         <div className='status-grid' aria-label='App status'>
@@ -95,7 +121,36 @@ export function HomeView({ actions, state }) {
             <span className='status-label'>App peers</span>
             <strong>{state.appPeerCount}</strong>
           </div>
+          <div>
+            <span className='status-label'>Unread</span>
+            <strong>{state.notifications.unreadCount}</strong>
+          </div>
         </div>
+
+        {state.notifications.items.length > 0 ? (
+          <div className='notification-inbox'>
+            <div className='notification-inbox-heading'>
+              <span>
+                <Bell size={15} strokeWidth={2.4} />
+                Notifications
+              </span>
+              <button type='button' onClick={actions.markAllNotificationsRead}>
+                Mark read
+              </button>
+            </div>
+            {state.notifications.items.slice(0, 4).map((item) => (
+              <button
+                className={`notification-row ${item.read ? '' : 'unread'}`}
+                key={item.id}
+                type='button'
+                onClick={() => openNotification(item)}
+              >
+                <strong>{item.sender}</strong>
+                <span>{item.body}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {state.lastError ? (
           <p className='error-banner' role='status'>
@@ -229,7 +284,12 @@ export function HomeView({ actions, state }) {
               <div className='recent-private-row' key={room.code}>
                 <button type='button' onClick={() => actions.joinRoom({ room })}>
                   <strong>{room.title}</strong>
-                  <span>{roomInviteLabel(room)}</span>
+                  <span>
+                    {roomInviteLabel(room)}
+                    {unreadCountForRoom(state.notifications, room.code) > 0
+                      ? ` · ${unreadCountForRoom(state.notifications, room.code)} unread`
+                      : ''}
+                  </span>
                 </button>
                 <button type='button' title='Copy invite' onClick={() => copyInvite(room.invite)}>
                   <Copy size={14} strokeWidth={2.4} />

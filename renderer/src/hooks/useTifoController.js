@@ -41,6 +41,11 @@ import {
   timelineEventTypes
 } from '../tifo/domain.js'
 import {
+  addNotification,
+  markNotificationsRead,
+  notificationForEvent
+} from '../tifo/notifications.js'
+import {
   imageFileSupported,
   imageMimeType,
   mediaRefForBlob,
@@ -94,6 +99,8 @@ export function useTifoController() {
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
   const seenEffectEventIdsRef = useRef(new Set())
+  const typingSentAtRef = useRef(0)
+  const typingCleanupTimerRef = useRef(null)
 
   const activeChantRecorderRef = useRef(null)
   const activeChantStreamRef = useRef(null)
@@ -151,6 +158,96 @@ export function useTifoController() {
       profile: state.profile,
       rooms: knownMailboxRooms(state)
     })
+  }
+
+  function applyProfileReady(profile) {
+    if (!profile?.publicKey) return
+    saveLocalProfile(profile)
+    const recentPrivateRooms = loadRecentPrivateRooms(profile)
+    setAppState((state) => ({
+      ...state,
+      lastError: '',
+      nickname: profileName(profile),
+      profile,
+      recentPrivateRooms,
+      view: state.view === 'welcome' ? 'home' : state.view
+    }))
+  }
+
+  function markCurrentRoomRead(roomCode = stateRef.current.roomCode) {
+    if (!roomCode) return
+    const latestTimestamp = stateRef.current.events.reduce(
+      (latest, event) => Math.max(latest, Number.isFinite(event.timestamp) ? event.timestamp : 0),
+      Date.now()
+    )
+    setAppState((state) => ({
+      ...state,
+      notifications: markNotificationsRead(state.notifications, roomCode)
+    }))
+    sendWorkerCommand('room:read', {
+      readAt: latestTimestamp,
+      roomCode
+    })
+  }
+
+  function scheduleTypingCleanup() {
+    if (typingCleanupTimerRef.current) return
+    typingCleanupTimerRef.current = setTimeout(() => {
+      typingCleanupTimerRef.current = null
+      const now = Date.now()
+      setAppState((state) => ({
+        ...state,
+        typingUsers: state.typingUsers.filter((item) => item.expiresAt > now)
+      }))
+      if (stateRef.current.typingUsers.some((item) => item.expiresAt > now)) {
+        scheduleTypingCleanup()
+      }
+    }, 1200)
+  }
+
+  function applyTypingUpdate(message) {
+    if (!message?.room || message.room !== stateRef.current.roomCode || !message.user?.publicKey) {
+      return
+    }
+
+    setAppState((state) => {
+      const withoutUser = state.typingUsers.filter(
+        (item) => item.user.publicKey !== message.user.publicKey
+      )
+      return {
+        ...state,
+        typingUsers:
+          message.typing === false
+            ? withoutUser
+            : [
+                ...withoutUser,
+                {
+                  expiresAt: message.expiresAt || Date.now() + 4500,
+                  user: message.user
+                }
+              ]
+      }
+    })
+    scheduleTypingCleanup()
+  }
+
+  function applyReadUpdate(message) {
+    if (!message?.room || !message.user?.publicKey) return
+    setAppState((state) => ({
+      ...state,
+      readReceipts: {
+        ...state.readReceipts,
+        [message.room]: {
+          ...(state.readReceipts[message.room] || {}),
+          [message.user.publicKey]: {
+            displayName: message.user.displayName || message.user.username || 'Fan',
+            publicKey: message.user.publicKey,
+            readAt: Number.isFinite(message.readAt) ? message.readAt : Date.now(),
+            username: message.user.username || ''
+          }
+        }
+      }
+    }))
   }
 
   function resolvePendingChantLoad(eventId, dataUrl = '') {
@@ -477,12 +574,21 @@ export function useTifoController() {
       const existingIndex = nextEvents.findIndex((item) => item.id === event.id)
       if (existingIndex >= 0) nextEvents.splice(existingIndex, 1)
       nextEvents.unshift(event)
+      const notification = notificationForEvent(event, {
+        ...state,
+        events: nextEvents
+      })
       return {
         ...state,
         events: nextEvents,
+        notifications: addNotification(state.notifications, notification),
         lastError: ''
       }
     })
+
+    if (stateRef.current.view === 'room' && stateRef.current.roomCode === event.room) {
+      markCurrentRoomRead(event.room)
+    }
   }
 
   function applyWorkerMessage(message) {
@@ -513,8 +619,25 @@ export function useTifoController() {
           appPeerCount: Number.isFinite(message.count) ? message.count : state.appPeerCount
         }))
         break
+      case 'profile:ready':
+        applyProfileReady(message.profile)
+        syncWorkerMailbox()
+        break
       case 'mailbox:conversation':
         if (message.room) rememberPrivateRoom(message.room)
+        if (message.event) {
+          setAppState((state) => ({
+            ...state,
+            notifications: addNotification(
+              state.notifications,
+              notificationForEvent(message.event, {
+                ...state,
+                roomCode: state.roomCode,
+                roomTitle: message.room?.title || state.roomTitle
+              })
+            )
+          }))
+        }
         break
       case 'room:joined':
         setAppState((state) => ({
@@ -531,6 +654,7 @@ export function useTifoController() {
           events: message.events || [],
           chatDraft: '',
           chatReply: null,
+          typingUsers: [],
           chatMedia: {
             imageError: '',
             imageStatus: 'idle',
@@ -563,6 +687,7 @@ export function useTifoController() {
         prefetchChantAudios(message.events || [])
         prefetchChatMediaEvents(message.events || [])
         prefetchClipVideos(message.events || [])
+        markCurrentRoomRead(message.room.code)
         break
       case 'room:left':
         setAppState((state) => ({
@@ -626,6 +751,21 @@ export function useTifoController() {
           ...state,
           syncStatus: message.status
         }))
+        break
+      case 'sync:diagnostics':
+        setAppState((state) => ({
+          ...state,
+          syncDiagnostics: {
+            ...state.syncDiagnostics,
+            ...(message.diagnostics || {})
+          }
+        }))
+        break
+      case 'typing:update':
+        applyTypingUpdate(message)
+        break
+      case 'read:update':
+        applyReadUpdate(message)
         break
       case 'offline:state': {
         const pendingEventIds = Array.isArray(message.pendingEventIds)
@@ -1844,6 +1984,7 @@ export function useTifoController() {
       chatDraft: '',
       chatReply: null
     }))
+    sendWorkerCommand('typing:stop')
     sendWorkerCommand('chat:send', { replyTo, text: clean })
   }
 
@@ -1891,6 +2032,13 @@ export function useTifoController() {
       ...state,
       chatDraft: value
     }))
+    const now = Date.now()
+    if (value.trim() && stateRef.current.view === 'room' && now - typingSentAtRef.current > 1800) {
+      typingSentAtRef.current = now
+      sendWorkerCommand('typing:start')
+    } else if (!value.trim() && stateRef.current.view === 'room') {
+      sendWorkerCommand('typing:stop')
+    }
   }
 
   function setClipCaption(value) {
@@ -1905,6 +2053,25 @@ export function useTifoController() {
 
   function setOffline(enabled) {
     sendWorkerCommand('offline:set', { enabled })
+  }
+
+  function requestSyncDiagnostics() {
+    sendWorkerCommand('sync:diagnostics')
+  }
+
+  function requestRoomSync() {
+    sendWorkerCommand('sync:request')
+  }
+
+  function recoverRoomHistory() {
+    sendWorkerCommand('sync:recover')
+  }
+
+  function markAllNotificationsRead() {
+    setAppState((state) => ({
+      ...state,
+      notifications: markNotificationsRead(state.notifications)
+    }))
   }
 
   function sendReaction(reactionType) {
@@ -1938,6 +2105,7 @@ export function useTifoController() {
       releaseChantStream()
       releaseVoiceStream()
       clearReplayTimers()
+      if (typingCleanupTimerRef.current) clearTimeout(typingCleanupTimerRef.current)
       stopActiveReplayAudio()
       clearChatMediaUrls()
       clearClipPreviewUrls()
@@ -1963,9 +2131,13 @@ export function useTifoController() {
       loadChantAudio,
       loadChatMedia,
       loadClipVideo,
+      markAllNotificationsRead,
       openDmFromEvent,
+      recoverRoomHistory,
       replayFrom,
       reactToChatEvent,
+      requestRoomSync,
+      requestSyncDiagnostics,
       resetReplayPreview,
       saveChatImage,
       saveClipMetadata,

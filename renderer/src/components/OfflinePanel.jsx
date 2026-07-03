@@ -1,4 +1,6 @@
-export function OfflinePanel({ actions, metrics, offline, peerCount }) {
+import { RefreshCw, Wrench } from 'lucide-react'
+
+export function OfflinePanel({ actions, metrics, offline, peerCount, syncDiagnostics }) {
   const modeLabel = offline.enabled
     ? 'Offline mode'
     : metrics.pending > 0
@@ -43,6 +45,32 @@ export function OfflinePanel({ actions, metrics, offline, peerCount }) {
         <span aria-hidden='true'></span>
         <strong>Simulate offline</strong>
       </label>
+      <div className='sync-diagnostics-strip'>
+        <div>
+          <span>App peers</span>
+          <strong>{syncDiagnostics.appPeers}</strong>
+        </div>
+        <div>
+          <span>Mailbox topics</span>
+          <strong>{syncDiagnostics.knownMailboxTopics}</strong>
+        </div>
+        <div>
+          <span>Transfers</span>
+          <strong>
+            {syncDiagnostics.pendingTransfers.chants +
+              syncDiagnostics.pendingTransfers.chatMedia +
+              syncDiagnostics.pendingTransfers.clips}
+          </strong>
+        </div>
+        <button type='button' onClick={actions.requestRoomSync}>
+          <RefreshCw size={14} strokeWidth={2.4} />
+          Request sync
+        </button>
+        <button type='button' onClick={actions.recoverRoomHistory}>
+          <Wrench size={14} strokeWidth={2.4} />
+          Recover history
+        </button>
+      </div>
     </section>
   )
 }

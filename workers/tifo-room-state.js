@@ -9,6 +9,13 @@ function createTifoRoomState(options = {}) {
   const onChantSave = options.onChantSave || noop
   const onChatMediaSave = options.onChatMediaSave || noop
   const onClipSave = options.onClipSave || noop
+  const signEvent = options.signEvent || ((event) => event)
+  const verifyEvent =
+    options.verifyEvent ||
+    (() => ({
+      reason: 'unsigned',
+      verified: false
+    }))
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -66,10 +73,16 @@ function createTifoRoomState(options = {}) {
   function emptyProfile() {
     return {
       displayName: '',
+      deviceProof: '',
+      devicePublicKey: '',
+      identityPublicKey: '',
       nickname: '',
+      profileDiscoveryPublicKey: '',
+      profileProof: '',
       publicKey: '',
       userId: '',
-      username: ''
+      username: '',
+      verified: false
     }
   }
 
@@ -79,12 +92,14 @@ function createTifoRoomState(options = {}) {
 
   function createEvent(type, payload) {
     const createdAt = now()
-    return {
+    const event = {
       id: `${createdAt.toString(36)}-${random().toString(36).slice(2)}`,
       type,
       sender: profileDisplayName(),
       senderId: state.profile.userId || null,
-      senderKey: state.profile.publicKey || null,
+      senderDeviceKey: state.profile.devicePublicKey || null,
+      senderIdentityKey: state.profile.identityPublicKey || state.profile.publicKey || null,
+      senderKey: state.profile.identityPublicKey || state.profile.publicKey || null,
       timestamp: createdAt,
       room: state.room?.code || null,
       payload,
@@ -92,6 +107,8 @@ function createTifoRoomState(options = {}) {
       localCreatedAt: createdAt,
       version: 1
     }
+    const signed = signEvent(event)
+    return signed && typeof signed === 'object' ? signed : event
   }
 
   function addEvent(type, payload) {
@@ -172,6 +189,16 @@ function createTifoRoomState(options = {}) {
   function cleanUserId(value) {
     const userId = typeof value === 'string' ? value.trim() : ''
     return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
+  }
+
+  function cleanBase64(value, maxLength) {
+    const raw = typeof value === 'string' ? value.trim() : ''
+    return raw && raw.length <= maxLength ? raw : ''
+  }
+
+  function cleanSignature(value) {
+    const signature = typeof value === 'string' ? value.trim().toLowerCase() : ''
+    return /^[0-9a-f]{128}$/.test(signature) ? signature : ''
   }
 
   function cleanRoomCode(value) {
@@ -289,11 +316,17 @@ function createTifoRoomState(options = {}) {
     if (!displayName) return null
 
     return {
+      deviceProof: cleanBase64(source.deviceProof, 4096),
+      devicePublicKey: cleanPublicKey(source.devicePublicKey),
       displayName,
+      identityPublicKey: cleanPublicKey(source.identityPublicKey || source.publicKey),
       nickname: displayName,
+      profileDiscoveryPublicKey: cleanPublicKey(source.profileDiscoveryPublicKey),
+      profileProof: cleanBase64(source.profileProof, 4096),
       publicKey: cleanPublicKey(source.publicKey),
       userId: cleanUserId(source.userId),
-      username
+      username,
+      verified: source.verified === true
     }
   }
 
@@ -751,9 +784,10 @@ function createTifoRoomState(options = {}) {
     const cleanEvent = {
       id: event.id.slice(0, 96),
       type: event.type,
+      ...cleanSignedEventFields(event),
       sender: sender.slice(0, 24),
       senderId: cleanUserId(event.senderId),
-      senderKey: cleanPublicKey(event.senderKey),
+      senderKey: cleanPublicKey(event.senderKey || event.senderIdentityKey),
       timestamp,
       room: state.room.code,
       payload,
@@ -761,6 +795,7 @@ function createTifoRoomState(options = {}) {
       localCreatedAt: Number.isFinite(event.localCreatedAt) ? event.localCreatedAt : now(),
       version: Number.isFinite(event.version) ? event.version : 1
     }
+    applyVerification(cleanEvent)
 
     state.seenEventIds.add(cleanEvent.id)
     state.events.unshift(cleanEvent)
@@ -817,15 +852,16 @@ function createTifoRoomState(options = {}) {
     const payload = sanitizeRemotePayload(event)
     if (!payload) return null
 
-    return {
+    const cleanEvent = {
       id: event.id.slice(0, 96),
       type: event.type,
+      ...cleanSignedEventFields(event),
       sender:
         typeof event.sender === 'string' && event.sender.trim()
           ? event.sender.trim().slice(0, 24)
           : 'Stored fan',
       senderId: cleanUserId(event.senderId),
-      senderKey: cleanPublicKey(event.senderKey),
+      senderKey: cleanPublicKey(event.senderKey || event.senderIdentityKey),
       timestamp: Number.isFinite(event.timestamp) ? event.timestamp : now(),
       room: state.room.code,
       payload,
@@ -833,6 +869,28 @@ function createTifoRoomState(options = {}) {
       localCreatedAt: Number.isFinite(event.localCreatedAt) ? event.localCreatedAt : now(),
       version: Number.isFinite(event.version) ? event.version : 1
     }
+    applyVerification(cleanEvent)
+    return cleanEvent
+  }
+
+  function cleanSignedEventFields(event) {
+    return {
+      eventProof: cleanBase64(event.eventProof, 4096),
+      senderDeviceKey: cleanPublicKey(event.senderDeviceKey),
+      senderIdentityKey: cleanPublicKey(event.senderIdentityKey || event.senderKey),
+      signature: cleanSignature(event.signature),
+      signatureVersion: Number.isFinite(event.signatureVersion)
+        ? Math.max(0, Math.round(event.signatureVersion))
+        : 0
+    }
+  }
+
+  function applyVerification(event) {
+    const result = verifyEvent(event)
+    event.verified = result?.verified === true
+    event.verificationReason = result?.reason || (event.verified ? 'verified' : 'unsigned')
+    if (event.verified && event.senderIdentityKey) event.senderKey = event.senderIdentityKey
+    return event
   }
 
   function sortedEvents() {
@@ -849,9 +907,13 @@ function createTifoRoomState(options = {}) {
       event.type,
       event.sender,
       event.senderId,
+      event.senderDeviceKey,
+      event.senderIdentityKey,
       event.senderKey,
+      event.signature,
       event.timestamp,
       event.status,
+      event.verified,
       event.version,
       JSON.stringify(event.payload)
     ].join(':')
