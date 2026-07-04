@@ -84,12 +84,24 @@
   color: var(--ink-2);
 }
 
+.tifo-generated-conversation .c-ink1 {
+  color: var(--ink-1);
+}
+
 .tifo-generated-conversation .t-xs {
   font-size: 11px;
 }
 
 .tifo-generated-conversation .t-sm {
   font-size: 12px;
+}
+
+.tifo-generated-conversation .t-md {
+  font-size: 13px;
+}
+
+.tifo-generated-conversation .gap-3 {
+  gap: 12px;
 }
 
 .tifo-generated-conversation .h-display {
@@ -305,6 +317,144 @@
   padding: 8px 24px;
 }
 
+.tifo-generated-conversation .invite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.tifo-generated-conversation .invite-modal {
+  width: 460px;
+  max-width: 92vw;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 18px;
+  background: var(--bg-2);
+  box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.7);
+}
+
+.tifo-generated-conversation .invite-modal-intro {
+  padding: 22px 26px 0;
+}
+
+.tifo-generated-conversation .invite-eyebrow {
+  color: var(--acc-ink);
+}
+
+.tifo-generated-conversation .invite-modal h2 {
+  margin: 8px 0 0;
+  font-size: 30px;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.tifo-generated-conversation .invite-modal h2 span {
+  color: var(--acc-ink);
+  font-style: italic;
+}
+
+.tifo-generated-conversation .invite-modal p {
+  margin: 8px 0 0;
+  color: var(--ink-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tifo-generated-conversation .invite-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+}
+
+.tifo-generated-conversation .invite-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-0);
+  color: var(--ink-0);
+  font-size: 13px;
+}
+
+.tifo-generated-conversation .invite-input:focus-within {
+  border-color: rgba(111, 168, 144, 0.5);
+  box-shadow: 0 0 0 3px var(--acc-wash);
+}
+
+.tifo-generated-conversation .invite-input .prefix {
+  color: var(--ink-2);
+}
+
+.tifo-generated-conversation .invite-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.tifo-generated-conversation .invite-scan-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-1);
+}
+
+.tifo-generated-conversation .invite-qr {
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(0deg, #000 25%, transparent 25%),
+    linear-gradient(90deg, #000 25%, transparent 25%);
+  background-size: 10px 10px;
+}
+
+.tifo-generated-conversation .invite-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(111, 168, 144, 0.24);
+  border-radius: 8px;
+  background: var(--acc-wash);
+  color: var(--ink-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tifo-generated-conversation .invite-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--acc-ink);
+}
+
+.tifo-generated-conversation .invite-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line-1);
+}
+
 .tifo-generated-conversation .chat-bg {
   position: relative;
   background: #0f1113;
@@ -407,10 +557,24 @@
 }
 
 .tifo-generated-conversation .msg .avatar {
-  width: 34px;
-  height: 34px;
-  font-size: 12px;
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
   align-self: flex-end;
+  position: relative;
+}
+
+.tifo-generated-conversation .msg .avatar img {
+  position: relative;
+  z-index: 1;
+}
+
+.tifo-generated-conversation .msg .avatar span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tifo-generated-conversation .msg .body {
@@ -613,11 +777,11 @@
 }
 
 .tifo-generated-conversation .msg:not(.own) .chat-message-actions {
-  left: 46px;
+  left: 52px;
 }
 
 .tifo-generated-conversation .msg.own .chat-message-actions {
-  right: 46px;
+  right: 52px;
 }
 
 .tifo-generated-conversation .msg:hover .chat-message-actions {

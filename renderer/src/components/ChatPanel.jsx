@@ -27,6 +27,7 @@ import {
   readReceiptLabel
 } from '../tifo/domain.js'
 import { formatBytes, formatDuration, formatTime } from '../tifo/format.js'
+import { avatarUrl } from './home/homeModel.js'
 
 export function ChatPanel({
   actions,
@@ -514,6 +515,7 @@ function ChatItems({
   const [activeFanId, setActiveFanId] = useState('')
   const chatEvents = materializeChatEvents(state.events, state.profile)
   if (chatEvents.length === 0) {
+    if (state.syncStatus === 'Joining room') return null
     return <div className='empty-state'>No messages yet.</div>
   }
 
@@ -674,12 +676,15 @@ function GeneratedChatItem({
   status
 }) {
   const delivery = readReceiptLabel(event, state) || eventStatusLabel(event, state)
+  const sender = event.sender || 'Fan'
+  const senderAvatar = avatarUrl(event.senderKey || sender)
 
   return (
     <article className={`msg ${status} ${own ? 'own' : ''}`}>
       {!own ? (
         <div className='avatar'>
-          <span>{(event.sender || 'F').slice(0, 1).toUpperCase()}</span>
+          <img alt={`@${sender}`} src={senderAvatar} />
+          <span>{sender.slice(0, 1).toUpperCase()}</span>
         </div>
       ) : null}
       <div className='body'>
@@ -690,10 +695,10 @@ function GeneratedChatItem({
               type='button'
               onClick={() => onSetActiveFanId((id) => (id === event.id ? '' : event.id))}
             >
-              @{event.sender}
+              @{sender}
             </button>
           ) : !own ? (
-            <span className='name'>@{event.sender}</span>
+            <span className='name'>@{sender}</span>
           ) : null}
           <span className='time'>{formatTime(event.timestamp)}</span>
           <span className={`delivery ${status}`}>{delivery}</span>
@@ -709,7 +714,7 @@ function GeneratedChatItem({
         {activeFanId === event.id ? (
           <div className='chat-profile-popover'>
             <div>
-              <strong>{event.sender}</strong>
+              <strong>{sender}</strong>
               <span>
                 {event.senderKey
                   ? `${event.senderKey.slice(0, 6)}...${event.senderKey.slice(-4)}`

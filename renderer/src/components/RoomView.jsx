@@ -1,4 +1,5 @@
 import { Bell, Copy, Link2, LogOut, MoreHorizontal, Users } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
 
 import { eventMeta, reactionTheme, roomParts, safeClass } from '../tifo/domain.js'
@@ -11,12 +12,14 @@ import { ReactionEffects } from './ReactionEffects.jsx'
 import { ReplayPreview } from './ReplayPreview.jsx'
 import { ChatPanel } from './ChatPanel.jsx'
 import { ControlsPanel } from './ControlsPanel.jsx'
+import { InviteModal } from './conversation/InviteModal.jsx'
 import { TimelinePanel } from './TimelinePanel.jsx'
 import './conversation/generatedConversation.css'
 
 export function RoomView({ controller }) {
   const { actions, derived, state } = controller
   const [copyStatus, setCopyStatus] = useState('')
+  const [inviteOpen, setInviteOpen] = useState(false)
   const metrics = derived.metrics
   const hasEvents = metrics.playableEvents.length > 0
   const match = roomParts(state.roomCode)
@@ -60,10 +63,9 @@ export function RoomView({ controller }) {
           <ConversationHeader
             accent={accent}
             connected={connected}
-            copyInvite={copyInvite}
-            copyStatus={copyStatus}
             isDm={isDm}
             memberCount={memberCount}
+            onOpenInvite={() => setInviteOpen(true)}
             roomInvite={state.roomInvite}
             title={title}
           />
@@ -85,6 +87,15 @@ export function RoomView({ controller }) {
             title={isDm ? `Direct message with ${title}` : title}
             variant='generated'
           />
+          <AnimatePresence>
+            {inviteOpen ? (
+              <InviteModal
+                inviteLink={state.roomInvite}
+                onClose={() => setInviteOpen(false)}
+                title={title}
+              />
+            ) : null}
+          </AnimatePresence>
         </div>
       </main>
     )
@@ -220,10 +231,9 @@ export function RoomView({ controller }) {
 function ConversationHeader({
   accent,
   connected,
-  copyInvite,
-  copyStatus,
   isDm,
   memberCount,
+  onOpenInvite,
   roomInvite,
   title
 }) {
@@ -272,9 +282,9 @@ function ConversationHeader({
 
       <div className='row aic gap-2 header-actions'>
         {!isDm && roomInvite ? (
-          <button className='btn ghost sm' type='button' onClick={copyInvite}>
+          <button className='btn ghost sm' type='button' onClick={onOpenInvite}>
             <Link2 size={12} strokeWidth={2.4} />
-            {copyStatus || 'Invite'}
+            Invite
           </button>
         ) : null}
         <button className='btn ghost icon' title='Notifications' type='button'>
