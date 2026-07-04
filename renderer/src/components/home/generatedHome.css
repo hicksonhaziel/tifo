@@ -55,6 +55,10 @@
   overflow: hidden;
 }
 
+.tifo-generated-home .app-body.room-open {
+  background: var(--bg-0);
+}
+
 .tifo-generated-home .main {
   flex: 1;
   display: flex;
@@ -62,6 +66,28 @@
   min-width: 0;
   min-height: 0;
   background: var(--bg-0);
+}
+
+.tifo-generated-home .main-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tifo-generated-home .main > .room-view,
+.tifo-generated-home .main > .tifo-generated-conversation,
+.tifo-generated-home .main-panel > .room-view,
+.tifo-generated-home .main-panel > .tifo-generated-conversation {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.tifo-generated-home .main-panel > .tifo-generated-conversation {
+  height: 100%;
 }
 
 .tifo-generated-home .row {
@@ -182,6 +208,11 @@
 
 .tifo-generated-home .btn.ghost:hover {
   background: var(--bg-2);
+}
+
+.tifo-generated-home .btn.ghost.active {
+  background: var(--bg-3);
+  color: var(--acc-ink);
 }
 
 .tifo-generated-home .btn.primary {
@@ -490,8 +521,7 @@
 
 .tifo-generated-home .chat-bg {
   position: relative;
-  background:
-    radial-gradient(900px 520px at 50% 18%, rgba(111, 168, 144, 0.08), transparent 70%), #0f1113;
+  background: #0f1113;
 }
 
 .tifo-generated-home .chat-bg-pattern {
@@ -521,15 +551,13 @@
   content: '';
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(15, 17, 19, 0.12),
-      transparent 18%,
-      transparent 82%,
-      rgba(15, 17, 19, 0.12)
-    ),
-    radial-gradient(720px 460px at 50% 42%, transparent 45%, rgba(15, 17, 19, 0.16));
+  background: linear-gradient(
+    90deg,
+    rgba(15, 17, 19, 0.12),
+    transparent 18%,
+    transparent 82%,
+    rgba(15, 17, 19, 0.12)
+  );
 }
 
 .tifo-generated-home .chat-bg > *:not(.chat-bg-pattern) {
@@ -542,6 +570,70 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+.tifo-generated-home .home-workflow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.tifo-generated-home .home-workflow-card {
+  width: min(100%, 460px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.tifo-generated-home .home-workflow-head {
+  gap: 12px;
+}
+
+.tifo-generated-home .home-workflow-head .rail-tabs {
+  flex: 1;
+}
+
+.tifo-generated-home .home-workflow-copy {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: start;
+  gap: 12px;
+}
+
+.tifo-generated-home .workflow-icon {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(111, 168, 144, 0.24);
+  border-radius: 12px;
+  background: var(--acc-wash);
+  color: var(--acc-ink);
+}
+
+.tifo-generated-home .home-workflow-copy h2 {
+  margin: 0;
+  color: var(--ink-0);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.tifo-generated-home .home-workflow-copy p {
+  margin: 7px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tifo-generated-home .home-workflow-form {
+  gap: 10px;
 }
 
 .tifo-generated-home .home-empty-state {

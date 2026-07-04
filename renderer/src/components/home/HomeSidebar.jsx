@@ -13,6 +13,8 @@ import {
 } from './homeModel.js'
 
 export function HomeSidebar({
+  activePanel,
+  activeRoomCode,
   addMenuOpen,
   addTab,
   chats,
@@ -43,6 +45,7 @@ export function HomeSidebar({
   const profile = state.profile
   const username = usernameLabel(profile)
   const filteredChats = searchChats(chats, query)
+  const addPanelActive = ['join', 'create', 'dm'].includes(activePanel)
 
   return (
     <aside className='sidebar'>
@@ -73,9 +76,9 @@ export function HomeSidebar({
       <div className='grow' style={{ overflowY: 'auto', minHeight: 0 }}>
         <SideSection count={rooms.length} title='Match rooms' />
         <div className='side-nav'>
-          {rooms.map((room, index) => (
+          {rooms.map((room) => (
             <SidebarRoom
-              active={index === 0}
+              active={room.code === activeRoomCode}
               key={room.code}
               onClick={() => onRoomClick(room)}
               room={room}
@@ -86,7 +89,7 @@ export function HomeSidebar({
         <SideSection
           action={
             <button
-              className='btn ghost icon'
+              className={`btn ghost icon ${addPanelActive ? 'active' : ''}`}
               onClick={() => setAddMenuOpen((open) => !open)}
               style={{ height: 24, width: 24 }}
               title='New'
@@ -138,7 +141,12 @@ export function HomeSidebar({
         <div className='side-nav'>
           {filteredChats.length > 0 ? (
             filteredChats.map((row) => (
-              <SidebarChat key={row.key} onClick={() => onOpenChat(row)} row={row} />
+              <SidebarChat
+                active={row.key === activeRoomCode || row.room?.code === activeRoomCode}
+                key={row.key}
+                onClick={() => onOpenChat(row)}
+                row={row}
+              />
             ))
           ) : (
             <EmptyChats />
@@ -190,9 +198,9 @@ function SidebarRoom({ active, onClick, room }) {
   )
 }
 
-function SidebarChat({ onClick, row }) {
+function SidebarChat({ active, onClick, row }) {
   return (
-    <button className='side-item' onClick={onClick} type='button'>
+    <button className={`side-item ${active ? 'active' : ''}`} onClick={onClick} type='button'>
       <div className='ico'>
         {row.type === 'dm' && row.avatar ? (
           <img alt={row.title} src={row.avatar} />

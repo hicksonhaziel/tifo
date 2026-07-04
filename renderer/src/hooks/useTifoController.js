@@ -1838,11 +1838,12 @@ export function useTifoController() {
     }
   }
 
-  function rememberPrivateRoom(room) {
+  function rememberPrivateRoom(room, options = {}) {
+    const touch = options.touch !== false
     const recentPrivateRooms = saveRecentPrivateRoom(
       {
         ...room,
-        lastJoinedAt: Date.now()
+        lastJoinedAt: touch ? Date.now() : room.lastJoinedAt
       },
       stateRef.current.profile
     )
@@ -1960,8 +1961,48 @@ export function useTifoController() {
     const targetRoom = room || null
     const targetRoomCode = targetRoom?.code || roomCode
     if (!targetRoomCode) return
+    const publicRoom = availableRooms.find((item) => item.code === targetRoomCode)
+    const roomTitle = targetRoom?.title || publicRoom?.title || targetRoomCode
 
-    if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom)
+    if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom, { touch: false })
+
+    setAppState((state) => ({
+      ...state,
+      view: 'room',
+      roomCode: targetRoomCode,
+      roomInvite: targetRoom?.invite || '',
+      roomKind: targetRoom?.kind || 'match',
+      roomTitle,
+      peerCount: 0,
+      syncStatus: 'Joining room',
+      events: [],
+      chatDraft: '',
+      chatReply: null,
+      typingUsers: [],
+      chatMedia: {
+        imageError: '',
+        imageStatus: 'idle',
+        voiceElapsedMs: 0,
+        voiceError: '',
+        voiceStatus: 'idle'
+      },
+      clipDraft: clipDraftIdle(),
+      offline: {
+        detail: 'Network searching',
+        enabled: false,
+        lastFlushCount: 0,
+        pendingCount: 0,
+        pendingEventIds: new Set()
+      },
+      chantRecorder: {
+        elapsedMs: 0,
+        error: '',
+        status: 'idle'
+      },
+      replayPreview: replayIdleState(),
+      effects: [],
+      lastError: ''
+    }))
 
     sendWorkerCommand('profile:set', { profile })
     sendWorkerCommand('room:join', {

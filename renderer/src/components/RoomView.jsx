@@ -1,15 +1,18 @@
-import { Copy, LogOut } from 'lucide-react'
+import { Bell, Copy, Link2, LogOut, MoreHorizontal, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { eventMeta, reactionTheme, roomParts, safeClass } from '../tifo/domain.js'
 import { profileLabel } from '../tifo/identity.js'
 import { roomInviteLabel } from '../tifo/invites.js'
+import chatBgSharp from './home/chat-bg-sharp.png'
+import { avatarUrl } from './home/homeModel.js'
 import { OfflinePanel } from './OfflinePanel.jsx'
 import { ReactionEffects } from './ReactionEffects.jsx'
 import { ReplayPreview } from './ReplayPreview.jsx'
 import { ChatPanel } from './ChatPanel.jsx'
 import { ControlsPanel } from './ControlsPanel.jsx'
 import { TimelinePanel } from './TimelinePanel.jsx'
+import './conversation/generatedConversation.css'
 
 export function RoomView({ controller }) {
   const { actions, derived, state } = controller
@@ -41,68 +44,48 @@ export function RoomView({ controller }) {
   }
 
   if (conversationRoom) {
+    const isDm = state.roomKind === 'dm'
+    const memberCount = Math.max(1, state.peerCount + 1)
+    const title = state.roomTitle || (isDm ? 'Direct message' : 'Private group')
+    const accent = isDm ? '#B87A70' : '#7FA6D1'
+
     return (
-      <main className='conversation-view'>
-        <header className='conversation-header'>
-          <div className='brand-mini'>
-            <img className='brand-icon-image' src='../assets/brand/icon/tifo-app-icon.png' alt='' />
-            <div>
-              <p className='eyebrow'>{roomInviteLabel({ kind: state.roomKind })}</p>
-              <h1>{state.roomTitle}</h1>
-            </div>
-          </div>
-          <div className='room-actions'>
-            <span
-              className={`live-badge ${offlineActive ? 'offline' : connected ? 'connected' : ''}`}
-            >
-              <span aria-hidden='true'></span>
-              {offlineActive ? 'Offline' : connected ? 'Live' : 'Seeking peers'}
-            </span>
-            {state.roomInvite && state.roomKind !== 'dm' ? (
-              <button
-                className='ghost-action inline-flex items-center justify-center gap-2'
-                type='button'
-                onClick={copyInvite}
-              >
-                <Copy size={15} strokeWidth={2.4} />
-                {copyStatus || 'Copy invite'}
-              </button>
-            ) : null}
-            <button
-              className='ghost-action inline-flex items-center justify-center gap-2'
-              type='button'
-              onClick={actions.leaveRoom}
-            >
-              <LogOut size={15} strokeWidth={2.4} />
-              Leave
-            </button>
-          </div>
-        </header>
+      <main
+        className='tifo-generated-conversation'
+        style={{
+          '--chat-bg-image': `url(${chatBgSharp})`
+        }}
+      >
+        <div className='col grow' style={{ minHeight: 0 }}>
+          <ConversationHeader
+            accent={accent}
+            connected={connected}
+            copyInvite={copyInvite}
+            copyStatus={copyStatus}
+            isDm={isDm}
+            memberCount={memberCount}
+            roomInvite={state.roomInvite}
+            title={title}
+          />
 
-        {state.lastError ? (
-          <p className='error-banner' role='status'>
-            {state.lastError}
-          </p>
-        ) : null}
+          {state.lastError ? (
+            <p className='conversation-error-banner' role='status'>
+              {state.lastError}
+            </p>
+          ) : null}
 
-        <section className='conversation-main'>
           <ChatPanel
             actions={actions}
             connected={connected}
             derived={derived}
             metrics={metrics}
             offlineActive={offlineActive}
-            placeholder='Write a message'
+            placeholder='Say something to the terrace...'
             state={state}
-            subtitle={
-              state.roomKind === 'dm'
-                ? 'Direct chat with images, voice notes, and reactions'
-                : 'Group chat with images, voice notes, and reactions'
-            }
-            surfaceClassName='conversation-surface'
-            title={state.roomKind === 'dm' ? 'Messages' : 'Group chat'}
+            title={isDm ? `Direct message with ${title}` : title}
+            variant='generated'
           />
-        </section>
+        </div>
       </main>
     )
   }
@@ -231,5 +214,76 @@ export function RoomView({ controller }) {
         <TimelinePanel actions={actions} derived={derived} state={state} />
       </section>
     </main>
+  )
+}
+
+function ConversationHeader({
+  accent,
+  connected,
+  copyInvite,
+  copyStatus,
+  isDm,
+  memberCount,
+  roomInvite,
+  title
+}) {
+  const subtitle = isDm
+    ? connected
+      ? 'Direct messages · peer online'
+      : 'Direct messages · local-first'
+    : `${memberCount} member${memberCount === 1 ? '' : 's'} · ${
+        connected ? 'online' : 'local-first'
+      }`
+
+  return (
+    <div className='content-header'>
+      <div className='conversation-avatar avatar'>
+        {isDm ? (
+          <img alt={title} src={avatarUrl(`${title}-dm`)} />
+        ) : (
+          <div
+            style={{
+              alignItems: 'center',
+              background: `linear-gradient(135deg, ${accent}55, ${accent}11)`,
+              color: accent,
+              display: 'flex',
+              height: '100%',
+              justifyContent: 'center',
+              width: '100%'
+            }}
+          >
+            <Users size={16} strokeWidth={2.4} />
+          </div>
+        )}
+        <span className='presence-dot' aria-hidden='true' />
+      </div>
+
+      <div className='conversation-title col'>
+        <div className='row aic gap-2'>
+          <span className='h-display'>{title}</span>
+          <span className={`chip ${isDm && connected ? 'live' : 'mute'}`}>
+            {isDm ? (connected ? 'ONLINE' : 'LOCAL') : 'PRIVATE GROUP'}
+          </span>
+        </div>
+        <span className='t-xs c-mute'>{subtitle}</span>
+      </div>
+
+      <div className='grow' />
+
+      <div className='row aic gap-2 header-actions'>
+        {!isDm && roomInvite ? (
+          <button className='btn ghost sm' type='button' onClick={copyInvite}>
+            <Link2 size={12} strokeWidth={2.4} />
+            {copyStatus || 'Invite'}
+          </button>
+        ) : null}
+        <button className='btn ghost icon' title='Notifications' type='button'>
+          <Bell size={14} strokeWidth={2.4} />
+        </button>
+        <button className='btn ghost icon' title='More' type='button'>
+          <MoreHorizontal size={14} strokeWidth={2.4} />
+        </button>
+      </div>
+    </div>
   )
 }

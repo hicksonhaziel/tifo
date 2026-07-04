@@ -1,9 +1,12 @@
 import {
   Check,
+  FileText,
   ImagePlus,
+  Link2,
   MessageCircle,
   Mic,
   Pencil,
+  Plus,
   Reply,
   Send,
   ShieldCheck,
@@ -36,18 +39,22 @@ export function ChatPanel({
   state,
   subtitle = '',
   surfaceClassName = '',
-  title = 'Terrace chat'
+  title = 'Terrace chat',
+  variant = 'default'
 }) {
   const imageInputRef = useRef(null)
   const chatInputRef = useRef(null)
   const emojiPickerRef = useRef(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiTargetId, setEmojiTargetId] = useState('')
+  const [trayOpen, setTrayOpen] = useState(false)
   const [editingId, setEditingId] = useState('')
   const [editDraft, setEditDraft] = useState('')
   const voiceRecording = state.chatMedia.voiceStatus === 'recording'
   const voiceSaving = state.chatMedia.voiceStatus === 'saving'
   const imageSaving = state.chatMedia.imageStatus === 'saving'
+  const generated = variant === 'generated'
+  const hasDraft = state.chatDraft.trim().length > 0
 
   useEffect(() => {
     const picker = emojiPickerRef.current
@@ -98,6 +105,7 @@ export function ChatPanel({
 
   function openComposerEmoji() {
     setEmojiTargetId('')
+    setTrayOpen(false)
     setEmojiOpen((open) => (emojiTargetId ? true : !open))
   }
 
@@ -125,6 +133,129 @@ export function ChatPanel({
   function startReply(event) {
     actions.startChatReply(event)
     window.requestAnimationFrame(() => chatInputRef.current?.focus())
+  }
+
+  if (generated) {
+    return (
+      <section className='conversation-chat chat-bg' aria-label={title}>
+        <div className='chat-bg-pattern' />
+        <div className='conversation-scroll'>
+          <div className={`conversation-column ${state.roomKind === 'dm' ? 'dm' : ''}`}>
+            <div className='date-divider'>
+              <div className='hr grow' />
+              <span className='eyebrow'>Today</span>
+              <div className='hr grow' />
+            </div>
+            <div className='msg-list' id='chat-list'>
+              <ChatItems
+                actions={actions}
+                allowFanDm={allowFanDm}
+                derived={derived}
+                editDraft={editDraft}
+                editingId={editingId}
+                onCancelEdit={cancelEditing}
+                onEditDraftChange={setEditDraft}
+                onReact={openReactionPicker}
+                onSaveEdit={saveEdit}
+                onStartEdit={startEditing}
+                onStartReply={startReply}
+                state={state}
+                variant='generated'
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={`composer-wrap ${state.roomKind === 'dm' ? 'dm' : ''}`}>
+          <div className='composer'>
+            <TypingIndicator state={state} />
+            {emojiOpen && emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
+            {state.chatReply ? (
+              <ChatReplyPreview
+                mode='composer'
+                onCancel={actions.cancelChatReply}
+                reply={state.chatReply}
+              />
+            ) : null}
+            <form className='composer-capsule' onSubmit={submitChat}>
+              <input
+                type='file'
+                accept='image/png,image/jpeg,image/webp,image/gif'
+                hidden
+                ref={imageInputRef}
+                onChange={selectImage}
+              />
+              <button
+                className={`composer-attach ${trayOpen ? 'open' : ''}`}
+                onClick={() => setTrayOpen((open) => !open)}
+                title='Attach'
+                type='button'
+              >
+                <Plus size={18} />
+              </button>
+              <input
+                className='composer-input'
+                ref={chatInputRef}
+                maxLength='180'
+                placeholder={placeholder}
+                autoComplete='off'
+                value={state.chatDraft}
+                onChange={(event) => actions.setChatDraft(event.currentTarget.value)}
+              />
+              <button
+                className='composer-tool'
+                onClick={openComposerEmoji}
+                title='Emoji'
+                type='button'
+              >
+                <SmilePlus size={17} strokeWidth={2.4} />
+              </button>
+              <button
+                className={`composer-send ${voiceRecording ? 'recording' : hasDraft ? '' : 'mic'}`}
+                disabled={voiceSaving}
+                onClick={(event) => {
+                  if (voiceRecording) {
+                    event.preventDefault()
+                    actions.stopVoiceNoteRecording()
+                    return
+                  }
+                  if (!hasDraft) {
+                    event.preventDefault()
+                    actions.startVoiceNoteRecording()
+                  }
+                }}
+                title={voiceRecording ? 'Stop voice note' : hasDraft ? 'Send' : 'Record voice note'}
+                type={hasDraft ? 'submit' : 'button'}
+              >
+                {voiceRecording ? (
+                  <StopCircle size={16} strokeWidth={2.4} />
+                ) : hasDraft ? (
+                  <Send size={15} strokeWidth={2.4} />
+                ) : (
+                  <Mic size={16} strokeWidth={2.4} />
+                )}
+              </button>
+            </form>
+            {emojiOpen && !emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
+            {trayOpen ? (
+              <AttachmentTray
+                imageSaving={imageSaving}
+                imageInputRef={imageInputRef}
+                onEmoji={openComposerEmoji}
+                onVoice={() => {
+                  if (voiceRecording) actions.stopVoiceNoteRecording()
+                  else actions.startVoiceNoteRecording()
+                  setTrayOpen(false)
+                }}
+                voiceRecording={voiceRecording}
+                voiceSaving={voiceSaving}
+              />
+            ) : null}
+            <ChatMediaStatus state={state} />
+          </div>
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -239,6 +370,87 @@ function EmojiPickerPopover({ pickerRef }) {
   )
 }
 
+function AttachmentTray({
+  imageInputRef,
+  imageSaving,
+  onEmoji,
+  onVoice,
+  voiceRecording,
+  voiceSaving
+}) {
+  const tiles = [
+    {
+      disabled: imageSaving,
+      icon: <ImagePlus size={18} strokeWidth={2.4} />,
+      key: 'photo',
+      label: imageSaving ? 'Saving' : 'Photo',
+      onClick: () => imageInputRef.current?.click()
+    },
+    {
+      disabled: voiceSaving,
+      icon: voiceRecording ? (
+        <StopCircle size={18} strokeWidth={2.4} />
+      ) : (
+        <Mic size={18} strokeWidth={2.4} />
+      ),
+      key: 'voice',
+      label: voiceRecording ? 'Stop' : voiceSaving ? 'Saving' : 'Voice',
+      onClick: onVoice
+    },
+    {
+      icon: <SmilePlus size={18} strokeWidth={2.4} />,
+      key: 'emoji',
+      label: 'Emoji',
+      onClick: onEmoji
+    },
+    {
+      disabled: true,
+      icon: <Link2 size={18} strokeWidth={2.4} />,
+      key: 'link',
+      label: 'Link'
+    },
+    {
+      disabled: true,
+      icon: <FileText size={18} strokeWidth={2.4} />,
+      key: 'file',
+      label: 'File'
+    },
+    {
+      disabled: true,
+      icon: <MessageCircle size={18} strokeWidth={2.4} />,
+      key: 'poll',
+      label: 'Poll'
+    }
+  ]
+
+  return (
+    <div className='attach-tray'>
+      <div className='tray-head'>
+        <div className='tray-tabs'>
+          <button className='tray-tab active' type='button'>
+            Media
+          </button>
+        </div>
+        <span className='t-xs c-mute'>Tap once to send</span>
+      </div>
+      <div className='tray-grid'>
+        {tiles.map((tile) => (
+          <button
+            className='tray-tile'
+            disabled={tile.disabled}
+            key={tile.key}
+            onClick={tile.onClick}
+            type='button'
+          >
+            <div className='ic'>{tile.icon}</div>
+            <span className='lbl'>{tile.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ChatMediaStatus({ state }) {
   if (state.chatMedia.voiceStatus === 'recording') {
     return (
@@ -296,7 +508,8 @@ function ChatItems({
   onSaveEdit,
   onStartEdit,
   onStartReply,
-  state
+  state,
+  variant = 'default'
 }) {
   const [activeFanId, setActiveFanId] = useState('')
   const chatEvents = materializeChatEvents(state.events, state.profile)
@@ -308,6 +521,32 @@ function ChatItems({
     const status = eventStatus(event, state)
     const own = event.chatState?.own === true
     const canOpenFan = allowFanDm && !own && !!event.senderKey
+    if (variant === 'generated') {
+      return (
+        <GeneratedChatItem
+          actions={actions}
+          activeFanId={activeFanId}
+          allowFanDm={allowFanDm}
+          canOpenFan={canOpenFan}
+          derived={derived}
+          editDraft={editDraft}
+          editingId={editingId}
+          event={event}
+          key={event.id}
+          onCancelEdit={onCancelEdit}
+          onEditDraftChange={onEditDraftChange}
+          onReact={onReact}
+          onSaveEdit={onSaveEdit}
+          onSetActiveFanId={setActiveFanId}
+          onStartEdit={onStartEdit}
+          onStartReply={onStartReply}
+          own={own}
+          state={state}
+          status={status}
+        />
+      )
+    }
+
     return (
       <article className={`chat-message ${status} ${own ? 'own' : ''}`} key={event.id}>
         <div className='chat-message-header'>
@@ -413,6 +652,142 @@ function ChatItems({
       </article>
     )
   })
+}
+
+function GeneratedChatItem({
+  actions,
+  activeFanId,
+  canOpenFan,
+  derived,
+  editDraft,
+  editingId,
+  event,
+  onCancelEdit,
+  onEditDraftChange,
+  onReact,
+  onSaveEdit,
+  onSetActiveFanId,
+  onStartEdit,
+  onStartReply,
+  own,
+  state,
+  status
+}) {
+  const delivery = readReceiptLabel(event, state) || eventStatusLabel(event, state)
+
+  return (
+    <article className={`msg ${status} ${own ? 'own' : ''}`}>
+      {!own ? (
+        <div className='avatar'>
+          <span>{(event.sender || 'F').slice(0, 1).toUpperCase()}</span>
+        </div>
+      ) : null}
+      <div className='body'>
+        <div className='row aic gap-2' style={{ justifyContent: own ? 'flex-end' : 'flex-start' }}>
+          {!own && canOpenFan ? (
+            <button
+              className='name'
+              type='button'
+              onClick={() => onSetActiveFanId((id) => (id === event.id ? '' : event.id))}
+            >
+              @{event.sender}
+            </button>
+          ) : !own ? (
+            <span className='name'>@{event.sender}</span>
+          ) : null}
+          <span className='time'>{formatTime(event.timestamp)}</span>
+          <span className={`delivery ${status}`}>{delivery}</span>
+          <span
+            className={`verified-sender-badge ${event.verified ? 'verified' : 'unverified'}`}
+            title={eventTrustLabel(event)}
+          >
+            <ShieldCheck size={12} strokeWidth={2.5} />
+            {event.verified ? 'Signed' : 'Legacy'}
+          </span>
+        </div>
+
+        {activeFanId === event.id ? (
+          <div className='chat-profile-popover'>
+            <div>
+              <strong>{event.sender}</strong>
+              <span>
+                {event.senderKey
+                  ? `${event.senderKey.slice(0, 6)}...${event.senderKey.slice(-4)}`
+                  : 'fan'}
+              </span>
+            </div>
+            <button
+              className='btn primary sm'
+              type='button'
+              onClick={() => actions.openDmFromEvent(event)}
+            >
+              <MessageCircle size={14} strokeWidth={2.4} />
+              Message
+            </button>
+          </div>
+        ) : null}
+
+        <div className='generated-bubble'>
+          <ChatMessageBody
+            actions={actions}
+            derived={derived}
+            editDraft={editDraft}
+            editing={editingId === event.id}
+            event={event}
+            onCancelEdit={onCancelEdit}
+            onEditDraftChange={onEditDraftChange}
+            onSaveEdit={onSaveEdit}
+          />
+        </div>
+
+        <ChatReactionBar
+          actions={actions}
+          event={event}
+          onReact={onReact}
+          reactions={event.chatState?.reactions || []}
+        />
+
+        <div className='chat-message-actions'>
+          <button
+            className='chat-inline-action'
+            type='button'
+            title='Reply'
+            onClick={() => onStartReply(event)}
+          >
+            <Reply size={14} strokeWidth={2.4} />
+          </button>
+          <button
+            className='chat-inline-action'
+            type='button'
+            title='React'
+            onClick={() => onReact(event.id)}
+          >
+            <SmilePlus size={14} strokeWidth={2.4} />
+          </button>
+          {own && event.type === 'chat' ? (
+            <button
+              className='chat-inline-action'
+              type='button'
+              title='Edit message'
+              onClick={() => onStartEdit(event)}
+            >
+              <Pencil size={14} strokeWidth={2.4} />
+            </button>
+          ) : null}
+          {own ? (
+            <button
+              className='chat-inline-action danger'
+              type='button'
+              title='Delete message'
+              onClick={() => actions.deleteChatEvent(event.id)}
+            >
+              <Trash2 size={14} strokeWidth={2.4} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  )
 }
 
 function ChatMessageBody({
