@@ -62,7 +62,6 @@ button {
   height: 100vh;
 }
 
-.welcome-view,
 .home-view,
 .room-view,
 .conversation-view {
@@ -70,13 +69,11 @@ button {
   min-height: 100%;
 }
 
-.welcome-view,
 .home-view,
 .conversation-view {
   height: 100%;
 }
 
-.welcome-view,
 .home-view {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(390px, 0.56fr);
@@ -101,8 +98,6 @@ button {
 }
 
 .brand-panel,
-.welcome-brand,
-.identity-panel,
 .rooms-panel,
 .join-panel,
 .chat-surface,
@@ -115,8 +110,6 @@ button {
 }
 
 .brand-panel,
-.welcome-brand,
-.identity-panel,
 .rooms-panel,
 .join-panel {
   display: flex;
@@ -131,24 +124,6 @@ button {
   overflow: hidden;
   background:
     linear-gradient(135deg, rgba(229, 57, 53, 0.08), transparent 36%), rgba(18, 18, 18, 0.92);
-}
-
-.welcome-brand {
-  position: relative;
-  overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(229, 57, 53, 0.1), transparent 42%), rgba(18, 18, 18, 0.92);
-}
-
-.welcome-brand::after {
-  position: absolute;
-  right: -140px;
-  bottom: -130px;
-  width: 440px;
-  height: 440px;
-  border: 44px solid rgba(255, 255, 255, 0.055);
-  border-radius: 999px;
-  content: '';
 }
 
 .brand-panel::after {
@@ -185,63 +160,6 @@ button {
   object-fit: contain;
 }
 
-.tifo-mark {
-  position: relative;
-  width: 96px;
-  height: 96px;
-  flex: 0 0 auto;
-  overflow: hidden;
-  border: 8px solid var(--white-soft);
-  border-bottom-color: var(--red);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 50% 62%, rgba(229, 57, 53, 0.9), transparent 24%),
-    linear-gradient(180deg, #161616 0%, #050505 100%);
-}
-
-.tifo-mark::before {
-  position: absolute;
-  right: 12px;
-  bottom: 16px;
-  left: 12px;
-  height: 24px;
-  border-radius: 999px 999px 0 0;
-  background: repeating-linear-gradient(90deg, #050505 0 5px, transparent 5px 10px);
-  content: '';
-}
-
-.tifo-mark::after {
-  position: absolute;
-  inset: 12px;
-  border: 2px dashed rgba(255, 255, 255, 0.48);
-  border-radius: 999px;
-  content: '';
-}
-
-.tifo-mark span {
-  position: absolute;
-  right: 28px;
-  bottom: 30px;
-  width: 10px;
-  height: 36px;
-  border-radius: 999px;
-  background: var(--red);
-  transform: rotate(-18deg);
-}
-
-.tifo-mark.small {
-  width: 54px;
-  height: 54px;
-  border-width: 5px;
-}
-
-.tifo-mark.small span {
-  right: 16px;
-  bottom: 15px;
-  width: 6px;
-  height: 22px;
-}
-
 .eyebrow,
 .status-label {
   margin: 0;
@@ -263,62 +181,6 @@ p {
   line-height: 0.9;
 }
 
-.tagline {
-  position: relative;
-  max-width: 680px;
-  color: var(--white-soft);
-  font-size: clamp(30px, 4vw, 58px);
-  font-weight: 800;
-  line-height: 1.03;
-  z-index: 1;
-}
-
-.feature-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  position: relative;
-  z-index: 1;
-}
-
-.feature-row span {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--white-soft);
-  font-size: 13px;
-  font-weight: 800;
-  padding: 8px 11px;
-}
-
-.identity-principles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  position: relative;
-  z-index: 1;
-}
-
-.identity-principles span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--white-soft);
-  font-size: 13px;
-  font-weight: 800;
-  padding: 8px 11px;
-}
-
-.identity-form {
-  display: grid;
-  gap: 18px;
-  margin-top: 32px;
-}
-
-.username-field,
 .custom-room-input {
   display: grid;
   align-items: center;
@@ -327,41 +189,15 @@ p {
   background: #090909;
 }
 
-.username-field {
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-.username-field > span {
-  color: var(--red);
-  font-size: 18px;
-  font-weight: 900;
-  padding-left: 14px;
-}
-
-.username-field input,
 .custom-room-input input {
   border: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.username-field:focus-within,
 .custom-room-input:focus-within {
   border-color: var(--red);
   box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.18);
-}
-
-.identity-preview {
-  border: 1px solid rgba(47, 197, 125, 0.24);
-  border-radius: 8px;
-  background: rgba(47, 197, 125, 0.07);
-  padding: 14px;
-}
-
-.identity-preview strong {
-  display: block;
-  margin-top: 5px;
-  font-size: 22px;
 }
 
 .home-identity-panel {
@@ -821,7 +657,9 @@ label {
   font-weight: 700;
 }
 
-input {
+.home-view input,
+.room-view input,
+.conversation-view input {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line-strong);
@@ -832,9 +670,29 @@ input {
   padding: 14px 15px;
 }
 
-input:focus {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.18);
+.home-view input:focus,
+.room-view input:focus,
+.conversation-view input:focus {
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.tifo-onboarding input,
+.tifo-onboarding input:focus,
+.tifo-onboarding input:focus-visible {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  caret-color: #b8d4c6;
+}
+
+.tifo-onboarding input:-webkit-autofill,
+.tifo-onboarding input:-webkit-autofill:hover,
+.tifo-onboarding input:-webkit-autofill:focus {
+  border: 0 !important;
+  box-shadow: 0 0 0 1000px #14171a inset !important;
+  -webkit-text-fill-color: #f1eee8;
 }
 
 .primary-action,
@@ -2758,14 +2616,12 @@ input:focus {
     height: auto;
   }
 
-  .welcome-view,
   .home-view,
   .room-view {
     min-height: 100vh;
     height: auto;
   }
 
-  .welcome-view,
   .home-view,
   .room-grid {
     grid-template-columns: 1fr;
@@ -2813,7 +2669,6 @@ input:focus {
 }
 
 @media (max-width: 720px) {
-  .welcome-view,
   .home-view,
   .room-view,
   .conversation-view {
@@ -2821,8 +2676,6 @@ input:focus {
   }
 
   .brand-panel,
-  .welcome-brand,
-  .identity-panel,
   .rooms-panel,
   .join-panel {
     padding: 22px;
