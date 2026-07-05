@@ -174,26 +174,9 @@ function SidebarRoom({ active, onClick, room }) {
       </div>
       <div className='lbl'>
         <div className='t1'>{roomTitle(room)}</div>
-        <div className='t2 row aic gap-1'>
-          <span
-            style={{
-              background: room.homeAcc || room.homeAccent,
-              borderRadius: '50%',
-              display: 'inline-block',
-              height: 5,
-              width: 5
-            }}
-          />
-          <span>{roomRound(room).split('·')[0].trim()}</span>
-        </div>
+        <div className='t2'>{roomRound(room).split('·')[0].trim()}</div>
       </div>
-      {room.unread > 0 ? (
-        <span className='badge'>{room.unread}</span>
-      ) : room.live ? (
-        <span className='chip live' style={{ fontSize: 9, padding: '1px 7px' }}>
-          LIVE
-        </span>
-      ) : null}
+      {room.unread > 0 ? <span className='badge'>{room.unread}</span> : null}
     </button>
   )
 }

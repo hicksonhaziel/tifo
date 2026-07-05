@@ -527,10 +527,11 @@
 .tifo-generated-home .chat-bg-pattern {
   position: absolute;
   inset: 0;
+  background-attachment: fixed;
   background-image: var(--chat-bg-image);
   background-size: clamp(580px, 40vw, 740px) auto;
   background-repeat: repeat;
-  background-position: center center;
+  background-position: 0 0;
   opacity: 0.42;
   pointer-events: none;
   z-index: 0;
@@ -540,10 +541,11 @@
   content: '';
   position: absolute;
   inset: -50%;
+  background-attachment: fixed;
   background-image: var(--chat-bg-image);
   background-size: clamp(580px, 40vw, 740px) auto;
   background-repeat: repeat;
-  background-position: calc(50% + 290px) calc(50% + 512px);
+  background-position: 290px 512px;
   opacity: 0.55;
 }
 
