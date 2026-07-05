@@ -1,24 +1,17 @@
 import {
   Bell,
-  CircleDot,
-  Copy,
   Link2,
   MessageCircle,
   Mic,
   MoreHorizontal,
   Play,
-  Radio,
-  RefreshCw,
-  RotateCcw,
   Sparkles,
   Video,
-  Wifi,
-  WifiOff,
   Zap
 } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
 import { useMemo, useRef, useState } from 'react'
 
-import { reactionTypes } from '../../tifo/constants.js'
 import {
   eventMeta,
   eventStatusLabel,
@@ -35,9 +28,9 @@ import {
   formatTime
 } from '../../tifo/format.js'
 import { profileLabel, profileName } from '../../tifo/identity.js'
-import { ChantRecorder } from '../ChantRecorder.jsx'
+import { availableRooms } from '../../tifo/rooms.js'
 import { ChatPanel } from '../ChatPanel.jsx'
-import { ClipPicker } from '../ClipPicker.jsx'
+import { InviteModal } from '../conversation/InviteModal.jsx'
 import { ReactionEffects } from '../ReactionEffects.jsx'
 import { ReplayPreview } from '../ReplayPreview.jsx'
 import '../conversation/generatedConversation.css'
@@ -48,15 +41,29 @@ import './generatedMatch.css'
 
 export function MatchRoomView({ controller }) {
   const { actions, derived, state } = controller
-  const [copyStatus, setCopyStatus] = useState('')
+  const [inviteOpen, setInviteOpen] = useState(false)
   const [railTab, setRailTab] = useState('highlights')
   const metrics = derived.metrics
-  const match = roomParts(state.roomCode)
+  const roomFixture = useMemo(
+    () => availableRooms.find((room) => room.code === state.roomCode) || null,
+    [state.roomCode]
+  )
+  const match = roomFixture
+    ? {
+        away: roomFixture.awayName || roomFixture.away,
+        home: roomFixture.homeName || roomFixture.home,
+        round: roomFixture.round || roomFixture.region || ''
+      }
+    : roomParts(state.roomCode)
   const offlineActive = state.offline.enabled
   const connected = !offlineActive && state.peerCount > 0
-  const hasEvents = metrics.playableEvents.length > 0
   const activeEffect = state.effects[0]
-  const matchTitle = state.roomTitle || `${match.home} vs ${match.away}`
+  const matchTitle = matchRoomTitle({
+    fallbackTitle: `${match.home} vs ${match.away}`,
+    roomCode: state.roomCode,
+    roomFixture,
+    stateTitle: state.roomTitle
+  })
   const highlights = useMemo(() => {
     return timelineEvents(state.events)
       .slice()
@@ -67,19 +74,7 @@ export function MatchRoomView({ controller }) {
       })
   }, [state.events])
   const fans = useMemo(() => knownFans(state), [state.events, state.profile])
-  const headerFanCount = Math.max(state.peerCount + 1, fans.length)
-
-  async function copyInvite() {
-    const value = state.roomInvite || state.roomCode
-    if (!value) return
-    try {
-      await window.navigator.clipboard.writeText(value)
-      setCopyStatus('Copied')
-    } catch {
-      setCopyStatus('Failed')
-    }
-    window.setTimeout(() => setCopyStatus(''), 1500)
-  }
+  const inviteLink = state.roomInvite || state.roomCode
 
   return (
     <main
@@ -93,14 +88,9 @@ export function MatchRoomView({ controller }) {
       <ReactionEffects effects={state.effects} />
       <div className='col grow match-room-shell'>
         <MatchHeader
-          connected={connected}
-          copyStatus={copyStatus}
-          fanCount={headerFanCount}
           match={match}
           matchTitle={matchTitle}
-          offlineActive={offlineActive}
-          onCopyInvite={copyInvite}
-          state={state}
+          onOpenInvite={() => setInviteOpen(true)}
         />
 
         {state.lastError ? (
@@ -116,6 +106,7 @@ export function MatchRoomView({ controller }) {
             <ChatPanel
               actions={actions}
               allowFanDm
+              composerMode='match'
               connected={connected}
               derived={derived}
               metrics={metrics}
@@ -133,14 +124,8 @@ export function MatchRoomView({ controller }) {
                 <RailTab
                   active={railTab === 'highlights'}
                   count={highlights.length}
-                  label='Highlights'
+                  label='Timeline'
                   onClick={() => setRailTab('highlights')}
-                />
-                <RailTab
-                  active={railTab === 'actions'}
-                  count={metrics.reactions + metrics.chants + metrics.clips}
-                  label='Actions'
-                  onClick={() => setRailTab('actions')}
                 />
                 <RailTab
                   active={railTab === 'fans'}
@@ -160,35 +145,27 @@ export function MatchRoomView({ controller }) {
                   state={state}
                 />
               ) : null}
-              {railTab === 'actions' ? (
-                <ActionsTab
-                  actions={actions}
-                  hasEvents={hasEvents}
-                  metrics={metrics}
-                  state={state}
-                />
-              ) : null}
               {railTab === 'fans' ? <FansTab actions={actions} fans={fans} state={state} /> : null}
             </div>
           </aside>
         </section>
+        <AnimatePresence>
+          {inviteOpen ? (
+            <InviteModal
+              inviteLink={inviteLink}
+              kindLabel='room'
+              onClose={() => setInviteOpen(false)}
+              title={matchTitle}
+            />
+          ) : null}
+        </AnimatePresence>
       </div>
     </main>
   )
 }
 
-function MatchHeader({
-  connected,
-  copyStatus,
-  fanCount,
-  match,
-  matchTitle,
-  offlineActive,
-  onCopyInvite,
-  state
-}) {
-  const syncLabel = offlineActive ? 'OFFLINE' : connected ? 'P2P LIVE' : 'SEARCHING'
-  const subtitle = [match.round, state.roomCode].filter(Boolean).join(' · ')
+function MatchHeader({ match, matchTitle, onOpenInvite }) {
+  const subtitle = match.round || 'Live match terrace'
 
   return (
     <div className='content-header match-content-header'>
@@ -196,21 +173,14 @@ function MatchHeader({
       <div className='conversation-title col'>
         <div className='row aic gap-2'>
           <span className='h-display'>{matchTitle}</span>
-          <span className={`chip ${connected ? 'live' : 'mute'}`}>
-            {syncLabel} · {fanCount} fans
-          </span>
         </div>
         <span className='t-xs c-mute'>{subtitle || 'Live match terrace'}</span>
       </div>
       <div className='grow' />
       <div className='row aic gap-1 header-actions'>
-        <button className='btn ghost sm' type='button' onClick={onCopyInvite}>
-          {state.roomInvite ? (
-            <Link2 size={12} strokeWidth={2.4} />
-          ) : (
-            <Copy size={12} strokeWidth={2.4} />
-          )}
-          {copyStatus || (state.roomInvite ? 'Invite' : 'Copy room')}
+        <button className='btn ghost sm' type='button' onClick={onOpenInvite}>
+          <Link2 size={12} strokeWidth={2.4} />
+          Invite
         </button>
         <button className='btn ghost icon' title='Notifications' type='button'>
           <Bell size={14} strokeWidth={2.4} />
@@ -357,116 +327,6 @@ function ReactionHighlight({ reaction }) {
   )
 }
 
-function ActionsTab({ actions, hasEvents, metrics, state }) {
-  return (
-    <div className='match-actions-tab'>
-      <div className='match-rail-card'>
-        <div className='match-section-title'>
-          <span>Terrace flares</span>
-          <small>{metrics.reactions} sent</small>
-        </div>
-        <div className='match-flare-grid'>
-          {reactionTypes.map((reaction) => (
-            <button
-              className={`match-flare-button tone-${safeClass(reaction.tone)}`}
-              key={reaction.type}
-              onClick={() => actions.sendReaction(reaction.type)}
-              type='button'
-            >
-              <span aria-hidden='true'>{reactionGlyph(reaction.type)}</span>
-              <strong>{reaction.label}</strong>
-              <small>{reaction.cue}</small>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className='match-rail-card compact'>
-        <button
-          className='match-replay-action'
-          disabled={!hasEvents}
-          onClick={() => actions.replayFrom()}
-          type='button'
-        >
-          <Play size={14} fill='currentColor' strokeWidth={2.4} />
-          Replay Echo
-        </button>
-        <p className='match-note'>
-          {hasEvents
-            ? `${metrics.playableEvents.length} Echo-ready moments`
-            : 'Waiting for clips, chants, or flares'}
-        </p>
-      </div>
-
-      <div className='match-rail-card controls-card'>
-        <ClipPicker actions={actions} clip={state.clipDraft} />
-      </div>
-
-      <div className='match-rail-card controls-card'>
-        <ChantRecorder actions={actions} recorder={state.chantRecorder} />
-      </div>
-
-      <SyncCard actions={actions} metrics={metrics} state={state} />
-    </div>
-  )
-}
-
-function SyncCard({ actions, metrics, state }) {
-  const offlineActive = state.offline.enabled
-  const diagnostics = state.syncDiagnostics
-
-  return (
-    <div className='match-rail-card sync-card'>
-      <div className='match-section-title'>
-        <span>Mesh health</span>
-        <small>{state.syncStatus}</small>
-      </div>
-      <div className='match-status-grid'>
-        <StatusStat icon={<Wifi size={13} />} label='Room peers' value={state.peerCount} />
-        <StatusStat icon={<Radio size={13} />} label='App peers' value={diagnostics.appPeers} />
-        <StatusStat icon={<CircleDot size={13} />} label='Pending' value={metrics.pending} />
-        <StatusStat
-          icon={<RefreshCw size={13} />}
-          label='Last sync'
-          value={diagnostics.lastSyncAt ? formatTime(diagnostics.lastSyncAt) : 'Now'}
-        />
-      </div>
-      <div className='match-sync-actions'>
-        <button className='btn ghost sm' type='button' onClick={actions.requestRoomSync}>
-          <RefreshCw size={12} strokeWidth={2.4} />
-          Sync
-        </button>
-        <button className='btn ghost sm' type='button' onClick={actions.recoverRoomHistory}>
-          <RotateCcw size={12} strokeWidth={2.4} />
-          Recover
-        </button>
-        <button
-          className={`btn ghost sm ${offlineActive ? 'active' : ''}`}
-          type='button'
-          onClick={() => actions.setOffline(!offlineActive)}
-        >
-          {offlineActive ? (
-            <WifiOff size={12} strokeWidth={2.4} />
-          ) : (
-            <Wifi size={12} strokeWidth={2.4} />
-          )}
-          {offlineActive ? 'Offline' : 'Online'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function StatusStat({ icon, label, value }) {
-  return (
-    <div className='match-status-stat'>
-      <span>{icon}</span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
 function FansTab({ actions, fans, state }) {
   return (
     <div className='match-fans-list'>
@@ -590,12 +450,11 @@ function highlightIcon(event, reaction) {
   return <Sparkles size={14} strokeWidth={2.4} />
 }
 
-function reactionGlyph(type) {
-  if (type === 'goal') return 'G'
-  if (type === 'save') return 'S'
-  if (type === 'penalty') return 'P'
-  if (type === 'warning') return 'W'
-  if (type === 'flare') return 'F'
-  if (type === 'foul') return '!'
-  return type.slice(0, 1).toUpperCase()
+function matchRoomTitle({ fallbackTitle, roomCode, roomFixture, stateTitle }) {
+  if (roomFixture?.title) return roomFixture.title
+
+  const title = String(stateTitle || '').trim()
+  if (title && title !== roomCode && title.replace(/\s+/g, '-') !== roomCode) return title
+
+  return fallbackTitle
 }

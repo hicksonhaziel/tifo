@@ -2,7 +2,7 @@ import { AlertTriangle, Check, Copy, Link2, X } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 
-export function InviteModal({ inviteLink, onClose, title }) {
+export function InviteModal({ inviteLink, kindLabel = 'group', onClose, title }) {
   const [copied, setCopied] = useState(false)
 
   async function copyInvite() {
@@ -46,7 +46,9 @@ export function InviteModal({ inviteLink, onClose, title }) {
           <h2 className='h-display' id='invite-modal-title'>
             Invite fans to <span>{title}</span>
           </h2>
-          <p>Anyone with this invite can join the group and start chatting with the terrace.</p>
+          <p>
+            Anyone with this invite can join the {kindLabel} and start chatting with the terrace.
+          </p>
         </div>
 
         <div className='invite-modal-body'>
@@ -88,7 +90,7 @@ export function InviteModal({ inviteLink, onClose, title }) {
           <div className='invite-note'>
             <AlertTriangle size={14} strokeWidth={2.4} />
             <span>
-              This invite is peer-to-peer. Share it only with fans you want inside the group.
+              This invite is peer-to-peer. Share it only with fans you want inside the {kindLabel}.
             </span>
           </div>
         </div>

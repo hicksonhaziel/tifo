@@ -941,6 +941,48 @@
   z-index: 2;
 }
 
+.tifo-generated-conversation .quick-chants {
+  display: flex;
+  gap: 6px;
+  padding: 0 2px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tifo-generated-conversation .quick-chants::-webkit-scrollbar {
+  display: none;
+}
+
+.tifo-generated-conversation .quick-chant {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 5px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+
+.tifo-generated-conversation .quick-chant:hover {
+  border-color: rgba(111, 168, 144, 0.4);
+  background: var(--acc-wash);
+  color: var(--acc-ink);
+}
+
+.tifo-generated-conversation .quick-chant .emo {
+  font-size: 13px;
+}
+
 .tifo-generated-conversation .composer-wrap {
   max-width: 820px;
   margin: 0 auto;
@@ -1232,6 +1274,45 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: -0.005em;
+}
+
+.tifo-generated-conversation .flare-tray .tray-tile .ic {
+  border-color: rgba(229, 57, 53, 0.26);
+  background: rgba(229, 57, 53, 0.08);
+  color: #e53935;
+}
+
+.tifo-generated-conversation .flare-tray .tray-tile:hover:not(:disabled) {
+  border-color: rgba(229, 57, 53, 0.38);
+}
+
+.tifo-generated-conversation .flare-tray .tray-tile:hover:not(:disabled) .ic {
+  border-color: rgba(229, 57, 53, 0.42);
+  background: rgba(229, 57, 53, 0.12);
+}
+
+.tifo-generated-conversation .chant-tray {
+  display: grid;
+  gap: 10px;
+  padding: 4px 4px 2px;
+}
+
+.tifo-generated-conversation .chant-tray-record {
+  min-width: 0;
+}
+
+.tifo-generated-conversation .chant-tray-record .btn {
+  flex-shrink: 0;
+}
+
+.tifo-generated-conversation .chant-sample-action {
+  width: fit-content;
+}
+
+.tifo-generated-conversation .chant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .tifo-generated-conversation .typing-indicator,

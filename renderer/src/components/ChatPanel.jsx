@@ -14,12 +14,14 @@ import {
   SmilePlus,
   StopCircle,
   Trash2,
+  Video,
   X
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import 'emoji-picker-element'
 import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
 
+import { CHANT_MIN_MS } from '../tifo/constants.js'
 import {
   eventStatus,
   eventStatusLabel,
@@ -32,6 +34,7 @@ import { avatarUrl } from './home/homeModel.js'
 export function ChatPanel({
   actions,
   allowFanDm = false,
+  composerMode = 'basic',
   connected,
   derived,
   metrics,
@@ -44,18 +47,22 @@ export function ChatPanel({
   variant = 'default'
 }) {
   const imageInputRef = useRef(null)
+  const clipInputRef = useRef(null)
   const chatInputRef = useRef(null)
   const emojiPickerRef = useRef(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiTargetId, setEmojiTargetId] = useState('')
   const [trayOpen, setTrayOpen] = useState(false)
+  const [trayTab, setTrayTab] = useState(composerMode === 'match' ? 'flares' : 'media')
   const [editingId, setEditingId] = useState('')
   const [editDraft, setEditDraft] = useState('')
   const voiceRecording = state.chatMedia.voiceStatus === 'recording'
   const voiceSaving = state.chatMedia.voiceStatus === 'saving'
   const imageSaving = state.chatMedia.imageStatus === 'saving'
+  const clipSaving = state.clipDraft.status === 'saving'
   const generated = variant === 'generated'
   const hasDraft = state.chatDraft.trim().length > 0
+  const matchComposer = composerMode === 'match'
 
   useEffect(() => {
     const picker = emojiPickerRef.current
@@ -91,6 +98,12 @@ export function ChatPanel({
     if (file) actions.saveChatImage(file, state.chatDraft)
   }
 
+  function selectClip(event) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) actions.saveClipMetadata(file)
+  }
+
   function insertEmoji(emoji) {
     const input = chatInputRef.current
     const start = input?.selectionStart ?? state.chatDraft.length
@@ -102,6 +115,13 @@ export function ChatPanel({
       input?.focus()
       input?.setSelectionRange(start + emoji.length, start + emoji.length)
     })
+  }
+
+  function insertQuickChant(chant) {
+    const chantText = `${chant.emoji} ${chant.text}`
+    const nextDraft = `${state.chatDraft}${state.chatDraft.trim() ? ' ' : ''}${chantText}`
+    actions.setChatDraft(nextDraft)
+    window.requestAnimationFrame(() => chatInputRef.current?.focus())
   }
 
   function openComposerEmoji() {
@@ -178,6 +198,9 @@ export function ChatPanel({
                 reply={state.chatReply}
               />
             ) : null}
+            {matchComposer && !trayOpen && !voiceRecording ? (
+              <QuickChants onSelect={insertQuickChant} />
+            ) : null}
             <form className='composer-capsule' onSubmit={submitChat}>
               <input
                 type='file'
@@ -186,6 +209,15 @@ export function ChatPanel({
                 ref={imageInputRef}
                 onChange={selectImage}
               />
+              {matchComposer ? (
+                <input
+                  type='file'
+                  accept='video/*'
+                  hidden
+                  ref={clipInputRef}
+                  onChange={selectClip}
+                />
+              ) : null}
               <button
                 className={`composer-attach ${trayOpen ? 'open' : ''}`}
                 onClick={() => setTrayOpen((open) => !open)}
@@ -250,14 +282,25 @@ export function ChatPanel({
             {emojiOpen && !emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
             {trayOpen ? (
               <AttachmentTray
+                actions={actions}
+                clipInputRef={clipInputRef}
+                clipSaving={clipSaving}
                 imageSaving={imageSaving}
                 imageInputRef={imageInputRef}
+                mode={composerMode}
+                onChangeTab={setTrayTab}
                 onEmoji={openComposerEmoji}
+                onFlare={(reactionType) => {
+                  actions.sendReaction(reactionType)
+                  setTrayOpen(false)
+                }}
                 onVoice={() => {
                   if (voiceRecording) actions.stopVoiceNoteRecording()
                   else actions.startVoiceNoteRecording()
                   setTrayOpen(false)
                 }}
+                recorder={state.chantRecorder}
+                trayTab={trayTab}
                 voiceRecording={voiceRecording}
                 voiceSaving={voiceSaving}
               />
@@ -410,15 +453,53 @@ function RecordingStrip({ elapsedMs, onCancel }) {
   )
 }
 
+const quickChants = [
+  { emoji: '⚽', text: 'GOAAAL' },
+  { emoji: '🔥', text: 'up the terrace!' },
+  { emoji: '👀', text: 'watching now' },
+  { emoji: '🎥', text: 'clip incoming' },
+  { emoji: '🙌', text: 'unreal!' },
+  { emoji: '😤', text: 'ref pls' },
+  { emoji: '💚', text: 'come on lads' }
+]
+
+function QuickChants({ onSelect }) {
+  return (
+    <div className='quick-chants'>
+      {quickChants.map((chant) => (
+        <button
+          className='quick-chant'
+          key={chant.text}
+          onClick={() => onSelect(chant)}
+          type='button'
+        >
+          <span className='emo'>{chant.emoji}</span>
+          {chant.text}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function AttachmentTray({
+  actions,
+  clipInputRef,
+  clipSaving,
   imageInputRef,
   imageSaving,
+  mode,
+  onChangeTab,
   onEmoji,
+  onFlare,
   onVoice,
+  recorder,
+  trayTab,
   voiceRecording,
   voiceSaving
 }) {
-  const tiles = [
+  const matchMode = mode === 'match'
+  const activeTab = matchMode ? trayTab : 'media'
+  const mediaTiles = [
     {
       disabled: imageSaving,
       icon: <ImagePlus size={18} strokeWidth={2.4} />,
@@ -426,6 +507,17 @@ function AttachmentTray({
       label: imageSaving ? 'Saving' : 'Photo',
       onClick: () => imageInputRef.current?.click()
     },
+    ...(matchMode
+      ? [
+          {
+            disabled: clipSaving,
+            icon: <Video size={18} strokeWidth={2.4} />,
+            key: 'clip',
+            label: clipSaving ? 'Saving' : 'Clip',
+            onClick: () => clipInputRef.current?.click()
+          }
+        ]
+      : []),
     {
       disabled: voiceSaving,
       icon: voiceRecording ? (
@@ -449,12 +541,16 @@ function AttachmentTray({
       key: 'link',
       label: 'Link'
     },
-    {
-      disabled: true,
-      icon: <FileText size={18} strokeWidth={2.4} />,
-      key: 'file',
-      label: 'File'
-    },
+    ...(matchMode
+      ? []
+      : [
+          {
+            disabled: true,
+            icon: <FileText size={18} strokeWidth={2.4} />,
+            key: 'file',
+            label: 'File'
+          }
+        ]),
     {
       disabled: true,
       icon: <MessageCircle size={18} strokeWidth={2.4} />,
@@ -467,26 +563,291 @@ function AttachmentTray({
     <div className='attach-tray'>
       <div className='tray-head'>
         <div className='tray-tabs'>
-          <button className='tray-tab active' type='button'>
-            Media
-          </button>
+          {matchMode ? (
+            <>
+              <TrayTabButton
+                active={activeTab === 'flares'}
+                label='Flares'
+                onClick={() => onChangeTab('flares')}
+              />
+              <TrayTabButton
+                active={activeTab === 'chant'}
+                label='Chant'
+                onClick={() => onChangeTab('chant')}
+              />
+            </>
+          ) : null}
+          <TrayTabButton
+            active={activeTab === 'media'}
+            label='Media'
+            onClick={() => onChangeTab('media')}
+          />
         </div>
         <span className='t-xs c-mute'>Tap once to send</span>
       </div>
-      <div className='tray-grid'>
-        {tiles.map((tile) => (
-          <button
-            className='tray-tile'
-            disabled={tile.disabled}
-            key={tile.key}
-            onClick={tile.onClick}
-            type='button'
-          >
-            <div className='ic'>{tile.icon}</div>
-            <span className='lbl'>{tile.label}</span>
-          </button>
+      {matchMode && activeTab === 'flares' ? <FlareTray onFlare={onFlare} /> : null}
+      {matchMode && activeTab === 'chant' ? (
+        <ChantTray actions={actions} recorder={recorder} />
+      ) : null}
+      {activeTab === 'media' ? <TrayGrid tiles={mediaTiles} /> : null}
+    </div>
+  )
+}
+
+function TrayTabButton({ active, label, onClick }) {
+  return (
+    <button className={`tray-tab ${active ? 'active' : ''}`} onClick={onClick} type='button'>
+      {label}
+    </button>
+  )
+}
+
+function TrayGrid({ tiles }) {
+  return (
+    <div className='tray-grid'>
+      {tiles.map((tile) => (
+        <button
+          className='tray-tile'
+          disabled={tile.disabled}
+          key={tile.key}
+          onClick={tile.onClick}
+          type='button'
+        >
+          <div className='ic'>{tile.icon}</div>
+          <span className='lbl'>{tile.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function FlareTray({ onFlare }) {
+  const flares = [
+    { icon: <GoalGlyph size={20} />, label: 'Goal', type: 'goal' },
+    { icon: <SaveGlyph size={20} />, label: 'Save', type: 'save' },
+    { icon: <VarGlyph size={20} />, label: 'VAR', type: 'var' },
+    { icon: <WhistleGlyph size={20} />, label: 'Whistle', type: 'full-time' },
+    { icon: <FoulGlyph size={20} />, label: 'Foul', type: 'penalty' },
+    { icon: <FireGlyph size={20} />, label: 'Fire', type: 'flare' }
+  ]
+
+  return (
+    <div className='tray-grid flare-tray'>
+      {flares.map((flare) => (
+        <button
+          className='tray-tile'
+          key={flare.type}
+          onClick={() => onFlare(flare.type)}
+          type='button'
+        >
+          <div className='ic'>{flare.icon}</div>
+          <span className='lbl'>{flare.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function GoalGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <g opacity='0.62' stroke='currentColor' strokeWidth='1'>
+        <path d='M4 8h32v22l-16 6-16-6z' />
+        <path d='M4 14h32M4 20h32M4 26h32M10 8v24M16 8v26M20 8v28M24 8v26M30 8v24' />
+      </g>
+      <circle cx='20' cy='20' fill='#f3f0e8' r='7' stroke='#111519' strokeWidth='1' />
+      <path d='M20 15l2.9 2-1.1 3.4h-3.6L17.1 17z' fill='#111519' />
+      <path
+        d='M20 15v-3M22.9 17l2.4-1.2M21.8 20.4l1.8 2.4M18.2 20.4l-1.8 2.4M17.1 17l-2.4-1.2'
+        stroke='#111519'
+        strokeWidth='0.8'
+      />
+    </svg>
+  )
+}
+
+function SaveGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <path
+        d='M8 24c0-6 4-9 8-9v-5c0-2 2-3 3-3s3 1 3 3v5h2v-4c0-2 2-3 3-3s3 1 3 3v5h1c2 0 3 2 3 4v8c0 4-4 6-8 6H14c-4 0-6-4-6-6z'
+        fill='currentColor'
+        fillOpacity='0.15'
+        stroke='currentColor'
+        strokeLinejoin='round'
+        strokeWidth='1.6'
+      />
+      <circle cx='6' cy='14' r='2.8' stroke='currentColor' strokeWidth='1.4' />
+      <path
+        d='M6 11.2v5.6M3.2 14h5.6M9 12L5 8M12 10l-2-5M15 9V4'
+        opacity='0.75'
+        stroke='currentColor'
+        strokeLinecap='round'
+        strokeWidth='1.25'
+      />
+    </svg>
+  )
+}
+
+function FoulGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <rect
+        fill='currentColor'
+        fillOpacity='0.12'
+        height='22'
+        rx='2'
+        stroke='currentColor'
+        strokeWidth='1.8'
+        transform='rotate(-8 18 19)'
+        width='16'
+        x='10'
+        y='8'
+      />
+      <rect
+        fill='currentColor'
+        fillOpacity='0.22'
+        height='22'
+        rx='2'
+        stroke='currentColor'
+        strokeWidth='1.8'
+        transform='rotate(8 24 23)'
+        width='16'
+        x='16'
+        y='12'
+      />
+    </svg>
+  )
+}
+
+function VarGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <rect height='20' rx='2' stroke='currentColor' strokeWidth='1.8' width='28' x='6' y='10' />
+      <path d='M12 34l8-4 8 4' stroke='currentColor' strokeLinejoin='round' strokeWidth='1.6' />
+      <text
+        fill='currentColor'
+        fontFamily='Arial, sans-serif'
+        fontSize='10'
+        fontWeight='800'
+        letterSpacing='1'
+        textAnchor='middle'
+        x='20'
+        y='24'
+      >
+        VAR
+      </text>
+    </svg>
+  )
+}
+
+function WhistleGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <path
+        d='M6 20l16-5 10 3v8l-10 3-16-5z'
+        fill='currentColor'
+        fillOpacity='0.15'
+        stroke='currentColor'
+        strokeLinejoin='round'
+        strokeWidth='1.6'
+      />
+      <rect fill='currentColor' height='4' width='4' x='4' y='20' />
+      <circle cx='27' cy='22' fill='currentColor' fillOpacity='0.45' r='2.5' />
+      <path
+        d='M34 14c3 2 3 10 0 12M36 11c4 3 4 15 0 18'
+        opacity='0.75'
+        stroke='currentColor'
+        strokeLinecap='round'
+        strokeWidth='1.2'
+      />
+    </svg>
+  )
+}
+
+function FireGlyph({ size = 20 }) {
+  return (
+    <svg aria-hidden='true' fill='none' height={size} viewBox='0 0 40 40' width={size}>
+      <path
+        d='M20 6c2 6 8 8 8 16 0 6-4 10-8 10s-8-4-8-10c0-4 3-6 5-10 1 2 2 4 3 2 0-2-1-4 0-8z'
+        fill='currentColor'
+        fillOpacity='0.18'
+        stroke='currentColor'
+        strokeLinejoin='round'
+        strokeWidth='1.8'
+      />
+      <path
+        d='M20 18c1 4 4 4 4 8 0 3-2 4-4 4s-4-2-4-4c0-3 3-3 4-8z'
+        fill='currentColor'
+        fillOpacity='0.6'
+      />
+    </svg>
+  )
+}
+
+function ChantTray({ actions, recorder }) {
+  const isRecording = recorder.status === 'recording'
+  const isSaving = recorder.status === 'saving'
+  const canStop = isRecording && recorder.elapsedMs >= CHANT_MIN_MS
+  const suggestedChants = [
+    'Ole Ole',
+    'Super Eagles',
+    'We are the pride',
+    'Naija to the world',
+    "You'll never walk alone"
+  ]
+
+  return (
+    <div className='chant-tray'>
+      <div className='row aic gap-2 chant-tray-record'>
+        <button
+          className='btn primary sm'
+          disabled={isSaving || (isRecording && !canStop)}
+          onClick={() => {
+            if (isRecording) actions.stopChantRecording()
+            else actions.startChantRecording()
+          }}
+          type='button'
+        >
+          {isRecording ? (
+            <StopCircle size={13} strokeWidth={2.4} />
+          ) : (
+            <Mic size={13} strokeWidth={2.4} />
+          )}
+          {isSaving
+            ? 'Saving chant'
+            : isRecording
+              ? canStop
+                ? 'Stop chant'
+                : 'Hold...'
+              : 'Record chant'}
+        </button>
+        <span className='t-xs c-mute'>
+          {isRecording
+            ? formatDuration(recorder.elapsedMs)
+            : '3-10 seconds · sent to the whole room'}
+        </span>
+      </div>
+      <button
+        className='btn ghost sm chant-sample-action'
+        disabled={isRecording || isSaving}
+        onClick={actions.saveFallbackChant}
+        type='button'
+      >
+        Use sample chant
+      </button>
+      <div className='chant-suggestions'>
+        {suggestedChants.map((chant) => (
+          <span className='quick-chant' key={chant}>
+            "{chant}"
+          </span>
         ))}
       </div>
+      {recorder.error ? (
+        <p className='chat-media-status error' role='status'>
+          {recorder.error}
+        </p>
+      ) : null}
     </div>
   )
 }
