@@ -5,11 +5,12 @@ import {
   Link2,
   MessageCircle,
   Mic,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Reply,
   Send,
-  ShieldCheck,
   SmilePlus,
   StopCircle,
   Trash2,
@@ -22,7 +23,6 @@ import emojiDataUrl from 'emoji-picker-element-data/en/emojibase/data.json?url'
 import {
   eventStatus,
   eventStatusLabel,
-  eventTrustLabel,
   materializeChatEvents,
   readReceiptLabel
 } from '../tifo/domain.js'
@@ -189,28 +189,38 @@ export function ChatPanel({
               <button
                 className={`composer-attach ${trayOpen ? 'open' : ''}`}
                 onClick={() => setTrayOpen((open) => !open)}
+                disabled={voiceRecording}
                 title='Attach'
                 type='button'
               >
                 <Plus size={18} />
               </button>
-              <input
-                className='composer-input'
-                ref={chatInputRef}
-                maxLength='180'
-                placeholder={placeholder}
-                autoComplete='off'
-                value={state.chatDraft}
-                onChange={(event) => actions.setChatDraft(event.currentTarget.value)}
-              />
-              <button
-                className='composer-tool'
-                onClick={openComposerEmoji}
-                title='Emoji'
-                type='button'
-              >
-                <SmilePlus size={17} strokeWidth={2.4} />
-              </button>
+              {voiceRecording ? (
+                <RecordingStrip
+                  elapsedMs={state.chatMedia.voiceElapsedMs}
+                  onCancel={() => actions.stopVoiceNoteRecording({ discard: true })}
+                />
+              ) : (
+                <>
+                  <input
+                    className='composer-input'
+                    ref={chatInputRef}
+                    maxLength='180'
+                    placeholder={placeholder}
+                    autoComplete='off'
+                    value={state.chatDraft}
+                    onChange={(event) => actions.setChatDraft(event.currentTarget.value)}
+                  />
+                  <button
+                    className='composer-tool'
+                    onClick={openComposerEmoji}
+                    title='Emoji'
+                    type='button'
+                  >
+                    <SmilePlus size={17} strokeWidth={2.4} />
+                  </button>
+                </>
+              )}
               <button
                 className={`composer-send ${voiceRecording ? 'recording' : hasDraft ? '' : 'mic'}`}
                 disabled={voiceSaving}
@@ -225,11 +235,11 @@ export function ChatPanel({
                     actions.startVoiceNoteRecording()
                   }
                 }}
-                title={voiceRecording ? 'Stop voice note' : hasDraft ? 'Send' : 'Record voice note'}
-                type={hasDraft ? 'submit' : 'button'}
+                title={voiceRecording ? 'Send voice note' : hasDraft ? 'Send' : 'Record voice note'}
+                type={hasDraft && !voiceRecording ? 'submit' : 'button'}
               >
                 {voiceRecording ? (
-                  <StopCircle size={16} strokeWidth={2.4} />
+                  <Check size={16} strokeWidth={2.4} />
                 ) : hasDraft ? (
                   <Send size={15} strokeWidth={2.4} />
                 ) : (
@@ -367,6 +377,35 @@ function EmojiPickerPopover({ pickerRef }) {
         data-source={emojiDataUrl}
         ref={pickerRef}
       ></emoji-picker>
+    </div>
+  )
+}
+
+function RecordingStrip({ elapsedMs, onCancel }) {
+  const bars = [
+    8, 14, 20, 12, 18, 10, 22, 14, 8, 16, 12, 20, 10, 18, 14, 22, 10, 14, 8, 20, 12, 16, 10, 14
+  ]
+
+  return (
+    <div className='rec-strip'>
+      <span className='dot' aria-hidden='true' />
+      <div className='wave' aria-hidden='true'>
+        {bars.map((height, index) => (
+          <i
+            key={index}
+            style={{
+              animation: `tifo-rec-pulse ${0.6 + (index % 5) * 0.15}s infinite ${
+                (index % 7) * 0.05
+              }s`,
+              height
+            }}
+          />
+        ))}
+      </div>
+      <span className='time'>{formatDuration(elapsedMs)}</span>
+      <button className='composer-tool rec-cancel' onClick={onCancel} title='Cancel' type='button'>
+        <X size={16} strokeWidth={2.4} />
+      </button>
     </div>
   )
 }
@@ -564,13 +603,6 @@ function ChatItems({
             <strong>{event.sender}</strong>
           )}
           <span>{formatTime(event.timestamp)}</span>
-          <span
-            className={`verified-sender-badge ${event.verified ? 'verified' : 'unverified'}`}
-            title={eventTrustLabel(event)}
-          >
-            <ShieldCheck size={12} strokeWidth={2.5} />
-            {event.verified ? 'Signed' : 'Legacy'}
-          </span>
         </div>
         {activeFanId === event.id ? (
           <div className='chat-profile-popover'>
@@ -678,6 +710,8 @@ function GeneratedChatItem({
   const delivery = readReceiptLabel(event, state) || eventStatusLabel(event, state)
   const sender = event.sender || 'Fan'
   const senderAvatar = avatarUrl(event.senderKey || sender)
+  const voiceBubble =
+    event.type === 'chat-media' && event.payload?.kind === 'voice' ? 'voice-bubble' : ''
 
   return (
     <article className={`msg ${status} ${own ? 'own' : ''}`}>
@@ -702,13 +736,6 @@ function GeneratedChatItem({
           ) : null}
           <span className='time'>{formatTime(event.timestamp)}</span>
           <span className={`delivery ${status}`}>{delivery}</span>
-          <span
-            className={`verified-sender-badge ${event.verified ? 'verified' : 'unverified'}`}
-            title={eventTrustLabel(event)}
-          >
-            <ShieldCheck size={12} strokeWidth={2.5} />
-            {event.verified ? 'Signed' : 'Legacy'}
-          </span>
         </div>
 
         {activeFanId === event.id ? (
@@ -732,7 +759,7 @@ function GeneratedChatItem({
           </div>
         ) : null}
 
-        <div className='generated-bubble'>
+        <div className={`generated-bubble ${voiceBubble}`}>
           <ChatMessageBody
             actions={actions}
             derived={derived}
@@ -870,9 +897,12 @@ function ChatMessageBody({
   return (
     <div className='chat-media-message voice'>
       <ChatReplyPreview reply={payload.replyTo} />
-      <p>Voice note · {formatDuration(payload.durationMs || 0)}</p>
       {mediaUrl ? (
-        <audio controls preload='metadata' src={mediaUrl}></audio>
+        <VoiceNotePlayer
+          durationMs={payload.durationMs || 0}
+          own={event.chatState?.own === true}
+          src={mediaUrl}
+        />
       ) : (
         <button
           className='chat-media-load'
@@ -883,7 +913,54 @@ function ChatMessageBody({
           {isLoading ? 'Preparing voice note' : 'Load voice note'}
         </button>
       )}
-      <small>{formatBytes(payload.size)}</small>
+    </div>
+  )
+}
+
+function VoiceNotePlayer({ durationMs, own, src }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const bars = [6, 10, 14, 18, 12, 20, 8, 14, 16, 10, 18, 6, 12, 20, 14, 10, 8, 16, 12]
+
+  function togglePlayback() {
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (playing) {
+      audio.pause()
+      setPlaying(false)
+      return
+    }
+
+    audio
+      .play()
+      .then(() => setPlaying(true))
+      .catch(() => setPlaying(false))
+  }
+
+  return (
+    <div className={`vn chat-voice-note ${own ? 'own' : ''}`}>
+      <button
+        className='play'
+        onClick={togglePlayback}
+        title={playing ? 'Pause voice note' : 'Play voice note'}
+        type='button'
+      >
+        {playing ? <Pause size={12} strokeWidth={2.6} /> : <Play size={12} strokeWidth={2.6} />}
+      </button>
+      <div className='wave' aria-hidden='true'>
+        {bars.map((height, index) => (
+          <i key={index} style={{ height }} />
+        ))}
+      </div>
+      <span className='dur'>{formatDuration(durationMs)}</span>
+      <audio
+        onEnded={() => setPlaying(false)}
+        onPause={() => setPlaying(false)}
+        preload='metadata'
+        ref={audioRef}
+        src={src}
+      />
     </div>
   )
 }

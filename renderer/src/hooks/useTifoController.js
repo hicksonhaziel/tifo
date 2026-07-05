@@ -109,6 +109,7 @@ export function useTifoController() {
   const chantAutoStopTimerRef = useRef(null)
   const activeVoiceRecorderRef = useRef(null)
   const activeVoiceStreamRef = useRef(null)
+  const discardActiveVoiceRef = useRef(false)
   const voiceTickTimerRef = useRef(null)
   const voiceAutoStopTimerRef = useRef(null)
   const activeReplayAudioRef = useRef(null)
@@ -1172,6 +1173,7 @@ export function useTifoController() {
 
       activeVoiceStreamRef.current = stream
       activeVoiceRecorderRef.current = recorder
+      discardActiveVoiceRef.current = false
 
       recorder.addEventListener('dataavailable', (event) => {
         if (event.data.size > 0) chunks.push(event.data)
@@ -1180,6 +1182,20 @@ export function useTifoController() {
       recorder.addEventListener('stop', () => {
         const durationMs = Date.now() - startedAt
         releaseVoiceStream()
+        if (discardActiveVoiceRef.current) {
+          discardActiveVoiceRef.current = false
+          setAppState((state) => ({
+            ...state,
+            chatMedia: {
+              ...state.chatMedia,
+              voiceElapsedMs: 0,
+              voiceError: '',
+              voiceStatus: 'idle'
+            }
+          }))
+          return
+        }
+
         if (durationMs < VOICE_NOTE_MIN_MS) {
           setAppState((state) => ({
             ...state,
@@ -1257,7 +1273,10 @@ export function useTifoController() {
 
     if (!recorder) {
       releaseVoiceStream()
-      if (options.discard) return
+      if (options.discard) {
+        discardActiveVoiceRef.current = false
+        return
+      }
       setAppState((state) => ({
         ...state,
         chatMedia: {
@@ -1271,6 +1290,7 @@ export function useTifoController() {
     }
 
     if (options.discard) {
+      discardActiveVoiceRef.current = true
       if (recorder.state !== 'inactive') recorder.stop()
       return
     }

@@ -633,6 +633,18 @@
   color: var(--ink-0);
 }
 
+.tifo-generated-conversation .generated-bubble.voice-bubble {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.tifo-generated-conversation .msg.own .generated-bubble.voice-bubble {
+  border: 0;
+  background: transparent;
+}
+
 .tifo-generated-conversation .generated-bubble p {
   margin: 0;
   overflow-wrap: anywhere;
@@ -649,10 +661,76 @@
   background: var(--bg-1);
 }
 
-.tifo-generated-conversation .generated-bubble .chat-media-message.voice audio {
-  width: 260px;
-  max-width: 100%;
-  height: 34px;
+.tifo-generated-conversation .generated-bubble .chat-media-message.voice {
+  gap: 0;
+}
+
+.tifo-generated-conversation .chat-voice-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(260px, 72vw);
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--bg-3);
+}
+
+.tifo-generated-conversation .chat-voice-note.own {
+  border-color: rgba(111, 168, 144, 0.35);
+  background: var(--acc-deep);
+}
+
+.tifo-generated-conversation .chat-voice-note .play {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--acc);
+  color: #0f1113;
+  cursor: pointer;
+}
+
+.tifo-generated-conversation .chat-voice-note .wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  min-width: 0;
+}
+
+.tifo-generated-conversation .chat-voice-note .wave i {
+  display: block;
+  width: 2px;
+  flex: 1;
+  max-width: 3px;
+  border-radius: 2px;
+  background: var(--ink-1);
+}
+
+.tifo-generated-conversation .chat-voice-note.own .wave i {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.tifo-generated-conversation .chat-voice-note .dur {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tifo-generated-conversation .chat-voice-note.own .dur {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.tifo-generated-conversation .chat-voice-note audio {
+  display: none;
 }
 
 .tifo-generated-conversation .generated-bubble .chat-media-load {
@@ -918,6 +996,12 @@
   color: var(--ink-0);
 }
 
+.tifo-generated-conversation .composer-attach:disabled,
+.tifo-generated-conversation .composer-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .tifo-generated-conversation .composer-attach.open {
   background: var(--acc);
   color: #0f1113;
@@ -939,6 +1023,80 @@
 
 .tifo-generated-conversation .composer-input::placeholder {
   color: var(--ink-3);
+}
+
+.tifo-generated-conversation .rec-strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(212, 162, 90, 0.35);
+  border-radius: 999px;
+  background: var(--bg-2);
+}
+
+.tifo-generated-conversation .rec-strip .dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--amber);
+  animation: tifo-rec-dot 1s infinite;
+}
+
+.tifo-generated-conversation .rec-strip .wave {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  align-items: center;
+  gap: 2px;
+}
+
+.tifo-generated-conversation .rec-strip .wave i {
+  flex: 1;
+  min-height: 3px;
+  border-radius: 2px;
+  background: var(--amber);
+  opacity: 0.6;
+}
+
+.tifo-generated-conversation .rec-strip .time {
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tifo-generated-conversation .rec-strip .rec-cancel {
+  width: 26px;
+  height: 26px;
+  color: var(--amber);
+}
+
+@keyframes tifo-rec-dot {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tifo-rec-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.62);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 .tifo-generated-conversation .composer-send {
