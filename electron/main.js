@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, Notification } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -184,6 +184,42 @@ ipcMain.handle('app:afterUpdate', () => {
     app.relaunch()
   }
   app.quit()
+})
+
+ipcMain.handle('app:showNotification', (evt, payload = {}) => {
+  if (!Notification.isSupported()) return { ok: false, reason: 'unsupported' }
+
+  const title =
+    typeof payload.title === 'string' && payload.title.trim()
+      ? payload.title.trim().slice(0, 90)
+      : appName
+  const body =
+    typeof payload.body === 'string' && payload.body.trim()
+      ? payload.body.trim().slice(0, 180)
+      : 'New TIFO activity'
+
+  const notification = new Notification({
+    body,
+    icon: appIcon,
+    silent: payload.silent === true,
+    title
+  })
+
+  notification.on('click', () => {
+    const win = BrowserWindow.fromWebContents(evt.sender) || BrowserWindow.getAllWindows()[0]
+    if (!win || win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
+
+  notification.show()
+  return { ok: true }
+})
+
+ipcMain.handle('app:setBadgeCount', (evt, count = 0) => {
+  const cleanCount = Number.isFinite(count) ? Math.max(0, Math.min(999, Math.round(count))) : 0
+  return app.setBadgeCount(cleanCount)
 })
 
 function handleDeepLink(url) {

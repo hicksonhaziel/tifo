@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('bridge', {
       return ''
     }
   },
+  setBadgeCount: (count) => ipcRenderer.invoke('app:setBadgeCount', count),
+  showNotification: (payload) => ipcRenderer.invoke('app:showNotification', payload),
   startWorker: (specifier) => ipcRenderer.invoke('pear:startWorker', specifier),
   onWorkerStdout: (specifier, listener) => {
     const wrap = (evt, data) => listener(toBuffer(data))

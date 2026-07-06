@@ -1867,7 +1867,7 @@ async function processMailboxRecord(record) {
 function announceMailboxConversation(room, event = null) {
   if (!room || !['group', 'dm'].includes(room.kind)) return
   const key = `${room.kind}:${room.code}`
-  if (announcedMailboxRooms.has(key)) return
+  if (!event && announcedMailboxRooms.has(key)) return
   announcedMailboxRooms.add(key)
 
   const localKey = roomState.state.profile.publicKey || ''

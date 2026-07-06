@@ -98,6 +98,7 @@ export function useTifoController() {
   const pendingChatMediaPreviewsRef = useRef(new Map())
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
+  const desktopNotificationIdsRef = useRef(new Set())
   const seenEffectEventIdsRef = useRef(new Set())
   const typingSentAtRef = useRef(0)
   const typingCleanupTimerRef = useRef(null)
@@ -189,6 +190,38 @@ export function useTifoController() {
       readAt: latestTimestamp,
       roomCode
     })
+  }
+
+  function appIsBackgrounded() {
+    return (
+      typeof document !== 'undefined' &&
+      (document.visibilityState !== 'visible' || !document.hasFocus())
+    )
+  }
+
+  function showDesktopNotification(notification) {
+    if (!notification || desktopNotificationIdsRef.current.has(notification.id)) return
+    if (notification.read === true && !appIsBackgrounded()) return
+
+    desktopNotificationIdsRef.current.add(notification.id)
+    window.bridge
+      ?.showNotification?.({
+        body: notification.body,
+        id: notification.id,
+        roomCode: notification.roomCode,
+        title: `${notification.sender} · ${notification.roomTitle || 'TIFO'}`
+      })
+      ?.catch?.(() => {})
+  }
+
+  function notificationForIncomingEvent(event, state = stateRef.current, options = {}) {
+    const notification = notificationForEvent(event, {
+      ...state,
+      appActive: !appIsBackgrounded(),
+      notificationRoomTitle: options.roomTitle || ''
+    })
+    showDesktopNotification(notification)
+    return notification
   }
 
   function scheduleTypingCleanup() {
@@ -566,15 +599,13 @@ export function useTifoController() {
     prefetchChatMedia(event)
     prefetchClipVideo(event)
 
+    const notification = notificationForIncomingEvent(event)
+
     setAppState((state) => {
       const nextEvents = [...state.events]
       const existingIndex = nextEvents.findIndex((item) => item.id === event.id)
       if (existingIndex >= 0) nextEvents.splice(existingIndex, 1)
       nextEvents.unshift(event)
-      const notification = notificationForEvent(event, {
-        ...state,
-        events: nextEvents
-      })
       return {
         ...state,
         events: nextEvents,
@@ -583,7 +614,11 @@ export function useTifoController() {
       }
     })
 
-    if (stateRef.current.view === 'room' && stateRef.current.roomCode === event.room) {
+    if (
+      stateRef.current.view === 'room' &&
+      stateRef.current.roomCode === event.room &&
+      !appIsBackgrounded()
+    ) {
       markCurrentRoomRead(event.room)
     }
   }
@@ -623,16 +658,12 @@ export function useTifoController() {
       case 'mailbox:conversation':
         if (message.room) rememberPrivateRoom(message.room)
         if (message.event) {
+          const notification = notificationForIncomingEvent(message.event, stateRef.current, {
+            roomTitle: message.room?.title || ''
+          })
           setAppState((state) => ({
             ...state,
-            notifications: addNotification(
-              state.notifications,
-              notificationForEvent(message.event, {
-                ...state,
-                roomCode: state.roomCode,
-                roomTitle: message.room?.title || state.roomTitle
-              })
-            )
+            notifications: addNotification(state.notifications, notification)
           }))
         }
         break
@@ -2171,6 +2202,28 @@ export function useTifoController() {
       if (fallbackChantUrlRef.current) URL.revokeObjectURL(fallbackChantUrlRef.current)
     }
     // The worker callbacks use refs for fresh state; the worker should start once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    window.bridge?.setBadgeCount?.(appState.notifications?.unreadCount || 0)?.catch?.(() => {})
+  }, [appState.notifications?.unreadCount])
+
+  useEffect(() => {
+    function markVisibleRoomRead() {
+      if (appIsBackgrounded()) return
+      const { roomCode, view } = stateRef.current
+      if (view === 'room' && roomCode) markCurrentRoomRead(roomCode)
+    }
+
+    window.addEventListener('focus', markVisibleRoomRead)
+    document.addEventListener('visibilitychange', markVisibleRoomRead)
+
+    return () => {
+      window.removeEventListener('focus', markVisibleRoomRead)
+      document.removeEventListener('visibilitychange', markVisibleRoomRead)
+    }
+    // The handlers use refs for fresh state and should bind once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

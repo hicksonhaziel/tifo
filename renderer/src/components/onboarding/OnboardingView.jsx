@@ -3,6 +3,7 @@ import { ArrowRight, Check, Flag, Lock, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { normalizeUsername } from '../../tifo/identity.js'
+import tifoLogoLockup from './tifo-logo-lockup.png'
 
 const entrance = {
   hidden: { opacity: 0, y: 14 },
@@ -75,17 +76,16 @@ export function OnboardingView({ actions, state }) {
         <motion.div className='flex min-w-0 flex-col gap-8' variants={stagger}>
           <motion.div className='flex flex-col gap-4' variants={entrance}>
             <div className='flex min-w-0 items-center gap-3'>
-              <span className='inline-flex items-center text-[32px] font-bold leading-none tracking-[-0.02em] text-[#F1EEE8]'>
-                tifo<span className='ml-px text-[1.1em] leading-[0.6] text-[#6FA890]'>·</span>
-              </span>
+              <img
+                alt='TIFO'
+                className='h-[68px] w-auto max-w-[280px] object-contain object-left'
+                src={tifoLogoLockup}
+              />
               <span className='ml-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8B8880]'>
                 Living Terrace
               </span>
             </div>
 
-            <h1 className='max-w-[560px] text-[44px] font-bold leading-[1.02] tracking-[-0.03em] text-[#F1EEE8] md:text-[52px]'>
-              Claim your <span className='text-[#B8D4C6]'>terrace name.</span>
-            </h1>
             <p className='max-w-[460px] text-[15.5px] leading-[1.55] text-[#C7C3BB]'>
               A living terrace for every match. Chants, reactions, clips and DMs — all in one place,
               all stored on your device.

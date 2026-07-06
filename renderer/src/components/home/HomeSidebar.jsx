@@ -46,6 +46,7 @@ export function HomeSidebar({
   const username = usernameLabel(profile)
   const filteredChats = searchChats(chats, query)
   const addPanelActive = ['join', 'create', 'dm'].includes(activePanel)
+  const unreadTotal = state.notifications?.unreadCount || 0
 
   return (
     <aside className='sidebar'>
@@ -56,9 +57,14 @@ export function HomeSidebar({
         <div className='grow col' style={{ minWidth: 0 }}>
           <div className='row aic between'>
             <div className='name'>{displayName(profile)}</div>
-            <span className='chip live' style={{ fontSize: 9, padding: '2px 7px' }}>
-              Online
-            </span>
+            <div className='identity-status'>
+              {unreadTotal > 0 ? (
+                <span className='global-unread-badge'>{formatUnread(unreadTotal)}</span>
+              ) : null}
+              <span className='chip live' style={{ fontSize: 9, padding: '2px 7px' }}>
+                Online
+              </span>
+            </div>
           </div>
           <div className='handle'>@{username}</div>
         </div>
@@ -168,7 +174,11 @@ function SideSection({ action, count, title }) {
 
 function SidebarRoom({ active, onClick, room }) {
   return (
-    <button className={`side-item ${active ? 'active' : ''}`} onClick={onClick} type='button'>
+    <button
+      className={`side-item ${active ? 'active' : ''} ${room.unread > 0 ? 'unread' : ''}`}
+      onClick={onClick}
+      type='button'
+    >
       <div className='ico' style={{ background: 'transparent', border: 0 }}>
         <BallAvatar size={44} />
       </div>
@@ -176,14 +186,18 @@ function SidebarRoom({ active, onClick, room }) {
         <div className='t1'>{roomTitle(room)}</div>
         <div className='t2'>{roomRound(room).split('·')[0].trim()}</div>
       </div>
-      {room.unread > 0 ? <span className='badge'>{room.unread}</span> : null}
+      {room.unread > 0 ? <span className='badge'>{formatUnread(room.unread)}</span> : null}
     </button>
   )
 }
 
 function SidebarChat({ active, onClick, row }) {
   return (
-    <button className={`side-item ${active ? 'active' : ''}`} onClick={onClick} type='button'>
+    <button
+      className={`side-item ${active ? 'active' : ''} ${row.unread > 0 ? 'unread' : ''}`}
+      onClick={onClick}
+      type='button'
+    >
       <div className='ico'>
         {row.type === 'dm' && row.avatar ? (
           <img alt={row.title} src={row.avatar} />
@@ -210,10 +224,14 @@ function SidebarChat({ active, onClick, row }) {
       </div>
       <div className='col' style={{ alignItems: 'flex-end', gap: 4 }}>
         <div className='t2 c-mute t-xs'>{row.time}</div>
-        {row.unread > 0 ? <span className='badge'>{row.unread}</span> : null}
+        {row.unread > 0 ? <span className='badge'>{formatUnread(row.unread)}</span> : null}
       </div>
     </button>
   )
+}
+
+function formatUnread(count) {
+  return count > 99 ? '99+' : String(count)
 }
 
 function AddMenu({

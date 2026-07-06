@@ -2,6 +2,7 @@ import { ArrowLeft, Link2, MessageCircle, Users } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useMemo, useState } from 'react'
 
+import { unreadCountForRoom } from '../../tifo/notifications.js'
 import { availableRooms } from '../../tifo/rooms.js'
 import { RoomView } from '../RoomView.jsx'
 import { BallAvatar } from './BallAvatar.jsx'
@@ -26,7 +27,14 @@ export function HomeView({ actions, controller, state }) {
   const [copyStatus, setCopyStatus] = useState('')
   const [homePanel, setHomePanel] = useState('idle')
 
-  const rooms = useMemo(() => searchRooms(availableRooms, query), [query])
+  const rooms = useMemo(
+    () =>
+      searchRooms(availableRooms, query).map((room) => ({
+        ...room,
+        unread: unreadCountForRoom(activeState.notifications, room.code)
+      })),
+    [activeState.notifications, query]
+  )
   const chats = useMemo(() => recentChatRows(activeState), [activeState])
   const focusedHomePanel = !roomOpen && homePanel !== 'idle'
 

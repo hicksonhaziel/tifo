@@ -363,6 +363,34 @@
   color: var(--ink-2);
 }
 
+.tifo-generated-home .identity-status {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.tifo-generated-home .global-unread-badge,
+.tifo-generated-home .side-item .badge {
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--acc);
+  color: #0f1113;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 0 0 3px var(--acc-wash);
+}
+
+.tifo-generated-home .global-unread-badge {
+  min-width: 20px;
+  height: 20px;
+}
+
 .tifo-generated-home .side-search {
   padding: 12px 12px 8px;
 }
@@ -408,6 +436,18 @@
   color: var(--ink-0);
 }
 
+.tifo-generated-home .side-item.unread {
+  background: rgba(111, 168, 144, 0.045);
+}
+
+.tifo-generated-home .side-item.unread .lbl .t1 {
+  font-weight: 800;
+}
+
+.tifo-generated-home .side-item.unread .lbl .t2 {
+  color: var(--ink-1);
+}
+
 .tifo-generated-home .side-item.active::before {
   content: '';
   width: 3px;
@@ -418,15 +458,6 @@
   left: -8px;
   top: 50%;
   transform: translateY(-50%);
-}
-
-.tifo-generated-home .side-item .badge {
-  background: var(--acc);
-  color: #0f1113;
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
 }
 
 .tifo-generated-home .side-item .lbl {

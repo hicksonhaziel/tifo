@@ -14,13 +14,18 @@ export function notificationForEvent(event, state) {
   if (!['chat', 'chat-media', 'reaction', 'chant', 'clip'].includes(event.type)) return null
 
   const meta = eventMeta(event)
+  const currentRoomIsActive =
+    state.view === 'room' && state.roomCode === event.room && state.appActive !== false
   return {
     body: meta.text,
     id: event.id,
     kind: meta.label,
-    read: state.view === 'room' && state.roomCode === event.room,
+    read: currentRoomIsActive,
     roomCode: event.room || '',
-    roomTitle: state.roomCode === event.room ? state.roomTitle : event.room || 'TIFO',
+    roomTitle:
+      state.roomCode === event.room
+        ? state.roomTitle
+        : state.notificationRoomTitle || event.room || 'TIFO',
     sender: event.sender || 'Fan',
     timestamp: event.timestamp || Date.now()
   }
