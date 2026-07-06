@@ -80,15 +80,6 @@ function TimelineEvent({ actions, derived, event, state }) {
           <span className='event-sender'>{event.sender}</span>
           <div className='event-actions'>
             <span className={`event-status ${status}`}>{eventStatusLabel(event, state)}</span>
-            {event.type !== 'system' ? (
-              <button
-                className='event-replay-action'
-                type='button'
-                onClick={() => actions.replayFrom(event.id)}
-              >
-                Replay
-              </button>
-            ) : null}
           </div>
         </div>
       </div>

@@ -71,6 +71,11 @@
   margin: 14px 14px 10px;
 }
 
+.tifo-generated-match .match-rail .rail-tab {
+  min-width: 0;
+  padding-inline: 9px;
+}
+
 .tifo-generated-match .match-rail-scroll {
   flex: 1;
   min-height: 0;
@@ -161,62 +166,60 @@
   letter-spacing: 0;
 }
 
-.tifo-generated-match .match-highlight-text {
-  margin: 3px 0 0;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.tifo-generated-match .match-inline-link {
-  width: fit-content;
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--acc-ink);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.tifo-generated-match .match-inline-link:hover {
-  color: var(--ink-0);
-}
-
 .tifo-generated-match .match-clip-highlight {
   display: grid;
   gap: 8px;
   margin-top: 9px;
 }
 
-.tifo-generated-match .match-clip-copy {
-  display: grid;
-  gap: 2px;
-}
-
-.tifo-generated-match .match-clip-copy strong {
+.tifo-generated-match .match-clip-stage {
+  position: relative;
+  width: 100%;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1c2124, #14171a);
   overflow: hidden;
-  color: var(--ink-0);
-  font-size: 12px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.tifo-generated-match .match-clip-copy span {
+.tifo-generated-match .match-clip-stage video {
+  width: 100%;
+  height: 100%;
+  background: #0f1113;
+  object-fit: cover;
+}
+
+.tifo-generated-match .match-clip-play {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #0f1113;
+}
+
+.tifo-generated-match .match-clip-play:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.tifo-generated-match .match-clip-duration {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tifo-generated-match .match-clip-detail {
   color: var(--ink-2);
   font-family: var(--font-mono);
   font-size: 10.5px;
-}
-
-.tifo-generated-match .match-clip-highlight video {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  background: #0f1113;
-  object-fit: cover;
 }
 
 .tifo-generated-match .match-media-load {
@@ -250,6 +253,12 @@
   flex: 1;
 }
 
+.tifo-generated-match .tl-item.reaction .icon {
+  border-color: rgba(229, 57, 53, 0.26);
+  background: rgba(229, 57, 53, 0.08);
+  color: #e53935;
+}
+
 .tifo-generated-match .match-flare-pill {
   display: inline-flex;
   align-items: center;
@@ -258,21 +267,20 @@
   max-width: 100%;
   margin-top: 8px;
   padding: 4px 9px;
-  border: 1px solid rgba(111, 168, 144, 0.28);
+  border: 1px solid rgba(229, 57, 53, 0.26);
   border-radius: 999px;
-  background: var(--acc-wash);
-  color: var(--acc-ink);
+  background: rgba(229, 57, 53, 0.08);
+  color: #e53935;
   font-size: 11px;
   font-weight: 800;
 }
 
-.tifo-generated-match .match-flare-pill small {
-  overflow: hidden;
-  color: var(--ink-2);
-  font-size: 10px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tifo-generated-match .match-flare-pill svg {
+  flex-shrink: 0;
+}
+
+.tifo-generated-match .match-flare-pill span {
+  color: var(--ink-0);
 }
 
 .tifo-generated-match .match-fans-list {
@@ -311,18 +319,297 @@
   white-space: nowrap;
 }
 
+.tifo-generated-match .match-replay-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tifo-generated-match .match-replay-card,
+.tifo-generated-match .match-replay-empty,
+.tifo-generated-match .match-replay-anchors {
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-2);
+}
+
+.tifo-generated-match .match-replay-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.tifo-generated-match .match-replay-card strong {
+  color: var(--ink-0);
+  font-size: 14px;
+}
+
+.tifo-generated-match .match-replay-card p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tifo-generated-match .match-replay-start {
+  width: 100%;
+}
+
+.tifo-generated-match .match-replay-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.tifo-generated-match .match-replay-empty svg {
+  color: var(--acc-ink);
+  flex-shrink: 0;
+}
+
+.tifo-generated-match .match-replay-anchors {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.tifo-generated-match .match-replay-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.tifo-generated-match .match-replay-section-head span {
+  color: var(--ink-0);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tifo-generated-match .match-replay-section-head small {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tifo-generated-match .match-replay-anchor-list {
+  list-style: none;
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.tifo-generated-match .match-replay-anchor {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.tifo-generated-match .match-replay-anchor:last-child {
+  border-bottom: 0;
+}
+
+.tifo-generated-match .match-replay-anchor .icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg-3);
+  color: var(--acc-ink);
+}
+
+.tifo-generated-match .match-replay-anchor.reaction .icon {
+  border-color: rgba(229, 57, 53, 0.26);
+  background: rgba(229, 57, 53, 0.08);
+  color: #e53935;
+}
+
+.tifo-generated-match .match-replay-anchor .meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tifo-generated-match .match-replay-anchor .title {
+  overflow: hidden;
+  color: var(--ink-0);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tifo-generated-match .replay-preview {
-  position: absolute;
-  left: 18px;
-  right: 360px;
-  bottom: 18px;
-  z-index: 9;
-  width: auto;
+  position: static;
+  width: 100%;
   margin: 0;
   border: 1px solid rgba(111, 168, 144, 0.24);
   border-radius: 12px;
-  background: rgba(20, 23, 26, 0.94);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.34);
+  background: var(--bg-2);
+  box-shadow: none;
+}
+
+.tifo-generated-match .replay-main {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.tifo-generated-match .replay-main strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-0);
+  font-size: 14px;
+}
+
+.tifo-generated-match .replay-main p,
+.tifo-generated-match .replay-main small {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.tifo-generated-match .replay-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tifo-generated-match .replay-meta span {
+  padding: 2px 7px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tifo-generated-match .replay-progress-block {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.tifo-generated-match .replay-progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-3);
+}
+
+.tifo-generated-match .replay-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--acc);
+  transition: width 0.18s ease;
+}
+
+.tifo-generated-match .replay-cue-rail {
+  display: flex;
+  gap: 4px;
+}
+
+.tifo-generated-match .replay-cue-rail span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.tifo-generated-match .replay-cue-rail span.active {
+  background: var(--acc);
+  box-shadow: 0 0 0 4px var(--acc-wash);
+}
+
+.tifo-generated-match .replay-feed {
+  display: grid;
+  gap: 7px;
+  padding: 0 12px 12px;
+}
+
+.tifo-generated-match .replay-empty,
+.tifo-generated-match .replay-message {
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--bg-3);
+}
+
+.tifo-generated-match .replay-empty {
+  padding: 10px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.tifo-generated-match .replay-message {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 9px;
+  padding: 9px;
+}
+
+.tifo-generated-match .replay-message > span {
+  color: var(--acc-ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tifo-generated-match .replay-message strong {
+  color: var(--ink-0);
+  font-size: 12px;
+}
+
+.tifo-generated-match .replay-message p {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tifo-generated-match .replay-message em {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-1);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.tifo-generated-match .replay-controls {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.tifo-generated-match .replay-controls .ghost-action {
+  flex: 1;
+  min-height: 32px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-1);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tifo-generated-match .replay-controls .ghost-action:hover {
+  background: var(--bg-3);
+  color: var(--ink-0);
 }
 
 @media (max-width: 1040px) {
@@ -339,10 +626,6 @@
   .tifo-generated-match .match-rail {
     border-left: 0;
     border-top: 1px solid var(--line-1);
-  }
-
-  .tifo-generated-match .replay-preview {
-    right: 18px;
   }
 }
 
@@ -361,9 +644,12 @@
     max-width: 46vw;
   }
 
-  .tifo-generated-match .replay-preview {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
+  .tifo-generated-match .match-replay-anchor {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .tifo-generated-match .match-replay-anchor .btn {
+    grid-column: 2;
+    width: fit-content;
   }
 }

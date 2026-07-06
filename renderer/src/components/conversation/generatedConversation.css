@@ -1307,16 +1307,6 @@
   flex-shrink: 0;
 }
 
-.tifo-generated-conversation .chant-sample-action {
-  width: fit-content;
-}
-
-.tifo-generated-conversation .chant-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .tifo-generated-conversation .typing-indicator,
 .tifo-generated-conversation .chat-media-status {
   margin: 8px 0 0;

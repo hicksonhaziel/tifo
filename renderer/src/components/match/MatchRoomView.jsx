@@ -4,17 +4,16 @@ import {
   MessageCircle,
   Mic,
   MoreHorizontal,
+  Pause,
   Play,
   Sparkles,
-  Video,
-  Zap
+  Video
 } from 'lucide-react'
 import { AnimatePresence } from 'framer-motion'
 import { useMemo, useRef, useState } from 'react'
 
 import {
   eventMeta,
-  eventStatusLabel,
   reactionTheme,
   roomParts,
   safeClass,
@@ -37,6 +36,7 @@ import '../conversation/generatedConversation.css'
 import { BallAvatar } from '../home/BallAvatar.jsx'
 import chatBgSharp from '../home/chat-bg-sharp.png'
 import { avatarUrl } from '../home/homeModel.js'
+import { ReactionGlyph } from './FlareGlyphs.jsx'
 import './generatedMatch.css'
 
 export function MatchRoomView({ controller }) {
@@ -99,8 +99,6 @@ export function MatchRoomView({ controller }) {
           </p>
         ) : null}
 
-        <ReplayPreview actions={actions} replay={state.replayPreview} />
-
         <section className='match-room-body' aria-label='Match room'>
           <div className='match-chat-pane'>
             <ChatPanel
@@ -133,19 +131,23 @@ export function MatchRoomView({ controller }) {
                   label='Fans'
                   onClick={() => setRailTab('fans')}
                 />
+                <RailTab
+                  active={railTab === 'replay'}
+                  count={metrics.playableEvents.length}
+                  label='Replay'
+                  onClick={() => setRailTab('replay')}
+                />
               </div>
             </div>
 
             <div className='match-rail-scroll'>
               {railTab === 'highlights' ? (
-                <HighlightsTab
-                  actions={actions}
-                  derived={derived}
-                  events={highlights}
-                  state={state}
-                />
+                <HighlightsTab actions={actions} derived={derived} events={highlights} />
               ) : null}
               {railTab === 'fans' ? <FansTab actions={actions} fans={fans} state={state} /> : null}
+              {railTab === 'replay' ? (
+                <ReplayTab actions={actions} events={highlights} replay={state.replayPreview} />
+              ) : null}
             </div>
           </aside>
         </section>
@@ -202,7 +204,7 @@ function RailTab({ active, count, label, onClick }) {
   )
 }
 
-function HighlightsTab({ actions, derived, events, state }) {
+function HighlightsTab({ actions, derived, events }) {
   if (events.length === 0) {
     return (
       <div className='match-empty-card'>
@@ -216,23 +218,18 @@ function HighlightsTab({ actions, derived, events, state }) {
   return (
     <ol className='match-highlight-list'>
       {events.map((event) => (
-        <HighlightItem
-          actions={actions}
-          derived={derived}
-          event={event}
-          key={event.id}
-          state={state}
-        />
+        <HighlightItem actions={actions} derived={derived} event={event} key={event.id} />
       ))}
     </ol>
   )
 }
 
-function HighlightItem({ actions, derived, event, state }) {
+function HighlightItem({ actions, derived, event }) {
   const meta = eventMeta(event)
   const status = derived.eventStatus(event)
   const reaction = event.type === 'reaction' ? reactionTheme(event.payload.type) : null
   const icon = highlightIcon(event, reaction)
+  const title = timelineTitle(event, meta, reaction)
 
   return (
     <li className={`tl-item match-highlight-item ${safeClass(event.type)} ${status}`}>
@@ -242,11 +239,8 @@ function HighlightItem({ actions, derived, event, state }) {
           <span>@{event.sender}</span>
           <span>·</span>
           <span>{formatTime(event.timestamp)}</span>
-          <span>·</span>
-          <span>{eventStatusLabel(event, state)}</span>
         </div>
-        <div className='title'>{meta.label}</div>
-        <p className='match-highlight-text'>{meta.text}</p>
+        <div className='title'>{title}</div>
         {event.type === 'clip' ? (
           <ClipHighlight actions={actions} derived={derived} event={event} />
         ) : null}
@@ -254,13 +248,6 @@ function HighlightItem({ actions, derived, event, state }) {
           <ChantHighlight actions={actions} derived={derived} event={event} />
         ) : null}
         {event.type === 'reaction' && reaction ? <ReactionHighlight reaction={reaction} /> : null}
-        <button
-          className='match-inline-link'
-          type='button'
-          onClick={() => actions.replayFrom(event.id)}
-        >
-          Replay Echo
-        </button>
       </div>
     </li>
   )
@@ -270,29 +257,32 @@ function ClipHighlight({ actions, derived, event }) {
   const payload = event.payload
   const previewUrl = derived.clipPreviewUrlForEvent(event)
   const isLoading = derived.pendingClipLoads.has(event.id)
-  const caption = payload.caption || payload.title || 'Highlight clip'
+  const duration = formatClipDuration(payload.durationMs)
 
   return (
     <div className='match-clip-highlight'>
-      <div className='match-clip-copy'>
-        <strong>{caption}</strong>
-        <span>
-          {formatClipDuration(payload.durationMs)} · {formatBytes(payload.size)} ·{' '}
-          {formatDate(event.timestamp)}
-        </span>
-      </div>
       {previewUrl ? (
-        <video controls preload='metadata' src={previewUrl}></video>
+        <div className='match-clip-stage loaded'>
+          <video controls preload='metadata' src={previewUrl}></video>
+          <span className='match-clip-duration'>{duration}</span>
+        </div>
       ) : (
-        <button
-          className='match-media-load'
-          disabled={isLoading}
-          onClick={() => actions.loadClipVideo(event)}
-          type='button'
-        >
-          {isLoading ? 'Preparing clip' : 'Load clip'}
-        </button>
+        <div className='match-clip-stage'>
+          <button
+            className='btn primary icon match-clip-play'
+            disabled={isLoading}
+            onClick={() => actions.loadClipVideo(event)}
+            title={isLoading ? 'Preparing clip' : 'Load clip'}
+            type='button'
+          >
+            <Play size={12} fill='currentColor' strokeWidth={2.4} />
+          </button>
+          <span className='match-clip-duration'>{duration}</span>
+        </div>
       )}
+      <div className='match-clip-detail'>
+        {formatBytes(payload.size)} · {formatDate(event.timestamp)}
+      </div>
     </div>
   )
 }
@@ -320,11 +310,19 @@ function ChantHighlight({ actions, derived, event }) {
 function ReactionHighlight({ reaction }) {
   return (
     <div className={`match-flare-pill tone-${safeClass(reaction.tone)}`}>
-      <Zap size={12} strokeWidth={2.6} />
+      <ReactionGlyph size={14} type={reaction.type} />
       <span>{reaction.label}</span>
-      <small>{reaction.cue}</small>
     </div>
   )
+}
+
+function timelineTitle(event, meta, reaction) {
+  if (event.type === 'clip') {
+    return event.payload.caption || event.payload.title || 'Highlight clip'
+  }
+  if (event.type === 'chant') return meta.text
+  if (event.type === 'reaction') return reaction?.cue || meta.text
+  return meta.text || meta.label
 }
 
 function FansTab({ actions, fans, state }) {
@@ -361,6 +359,90 @@ function FansTab({ actions, fans, state }) {
   )
 }
 
+function ReplayTab({ actions, events, replay }) {
+  const anchorEvents = events.slice(0, 8)
+  const hasEvents = anchorEvents.length > 0
+
+  return (
+    <div className='match-replay-tab'>
+      <section className='match-replay-card'>
+        <div className='col gap-1'>
+          <span className='eyebrow'>Replay Echo</span>
+          <strong>Relive the terrace moment</strong>
+          <p>
+            Replays the chants, flares and clips around a selected timeline moment in match order.
+          </p>
+        </div>
+        <button
+          className='btn primary match-replay-start'
+          disabled={!hasEvents}
+          onClick={() => actions.replayFrom()}
+          type='button'
+        >
+          <Play size={13} fill='currentColor' strokeWidth={2.4} />
+          {replay.active ? 'Restart Echo' : 'Replay latest Echo'}
+        </button>
+      </section>
+
+      {replay.active ? (
+        <ReplayPreview actions={actions} replay={replay} />
+      ) : (
+        <div className='match-replay-empty'>
+          <Sparkles size={16} strokeWidth={2.4} />
+          <span>
+            {hasEvents
+              ? 'Pick a moment below or replay the latest Echo.'
+              : 'Waiting for an Echo-ready moment.'}
+          </span>
+        </div>
+      )}
+
+      <section className='match-replay-anchors'>
+        <div className='match-replay-section-head'>
+          <span>Anchor a moment</span>
+          <small>{anchorEvents.length} ready</small>
+        </div>
+        {hasEvents ? (
+          <ol className='match-replay-anchor-list'>
+            {anchorEvents.map((event) => (
+              <ReplayAnchorItem actions={actions} event={event} key={event.id} />
+            ))}
+          </ol>
+        ) : (
+          <div className='match-empty-card'>
+            <Sparkles size={18} strokeWidth={2.4} />
+            <strong>No replay source yet</strong>
+            <span>Send a flare, chant, or clip first.</span>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function ReplayAnchorItem({ actions, event }) {
+  const meta = eventMeta(event)
+  const reaction = event.type === 'reaction' ? reactionTheme(event.payload.type) : null
+  const title = timelineTitle(event, meta, reaction)
+
+  return (
+    <li className={`match-replay-anchor ${safeClass(event.type)}`}>
+      <div className='icon'>{highlightIcon(event, reaction)}</div>
+      <div className='col grow'>
+        <div className='meta'>
+          <span>@{event.sender}</span>
+          <span>·</span>
+          <span>{formatTime(event.timestamp)}</span>
+        </div>
+        <span className='title'>{title}</span>
+      </div>
+      <button className='btn ghost sm' onClick={() => actions.replayFrom(event.id)} type='button'>
+        Replay
+      </button>
+    </li>
+  )
+}
+
 function RailAudioPlayer({ durationMs, src }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -383,9 +465,14 @@ function RailAudioPlayer({ durationMs, src }) {
   }
 
   return (
-    <div className='vn match-rail-audio'>
-      <button className='play' onClick={togglePlayback} title='Play chant' type='button'>
-        <Play size={12} fill='currentColor' strokeWidth={2.4} />
+    <div className='vn chat-voice-note match-rail-audio'>
+      <button
+        className='play'
+        onClick={togglePlayback}
+        title={playing ? 'Pause chant' : 'Play chant'}
+        type='button'
+      >
+        {playing ? <Pause size={12} strokeWidth={2.6} /> : <Play size={12} strokeWidth={2.6} />}
       </button>
       <div className='wave' aria-hidden='true'>
         {bars.map((height, index) => (
@@ -446,7 +533,7 @@ function knownFans(state) {
 function highlightIcon(event, reaction) {
   if (event.type === 'clip') return <Video size={14} strokeWidth={2.4} />
   if (event.type === 'chant') return <Mic size={14} strokeWidth={2.4} />
-  if (reaction?.type === 'goal') return <Zap size={14} strokeWidth={2.6} />
+  if (event.type === 'reaction') return <ReactionGlyph size={16} type={reaction?.type} />
   return <Sparkles size={14} strokeWidth={2.4} />
 }
 
