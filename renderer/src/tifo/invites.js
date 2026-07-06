@@ -1,5 +1,6 @@
 export const RECENT_PRIVATE_ROOMS_KEY = 'tifo:private-rooms:v1'
 const INVITE_PREFIX = 'tifo://room/'
+const MAX_RECENT_PRIVATE_ROOMS = 40
 
 export function createPrivateGroupInvite(input = {}) {
   const title = cleanTitle(input.title) || 'Private group'
@@ -119,22 +120,38 @@ export function loadRecentPrivateRooms(profile = null) {
     return rooms
       .map((room) => sanitizeRecentRoom(room, profile))
       .filter(Boolean)
-      .slice(0, 8)
+      .slice(0, MAX_RECENT_PRIVATE_ROOMS)
   } catch {
     return []
   }
 }
 
 export function saveRecentPrivateRoom(room, profile = null) {
-  const clean = sanitizeRecentRoom(room, profile)
+  const current = loadRecentPrivateRooms(profile)
+  const roomCode = cleanCode(room?.code || '')
+  if (!roomCode) return current
+  const existing = current.find((item) => item.code === roomCode)
+  const clean = sanitizeRecentRoom(
+    {
+      ...existing,
+      ...room,
+      invite:
+        typeof room?.invite === 'string' && room.invite.trim() ? room.invite : existing?.invite,
+      lastJoinedAt: Number.isFinite(room?.lastJoinedAt)
+        ? room.lastJoinedAt
+        : existing?.lastJoinedAt || Date.now(),
+      topicKey:
+        typeof room?.topicKey === 'string' && room.topicKey.trim()
+          ? room.topicKey
+          : existing?.topicKey
+    },
+    profile
+  )
   if (!clean) return loadRecentPrivateRooms(profile)
 
-  const next = [
-    clean,
-    ...loadRecentPrivateRooms(profile).filter((item) => item.code !== clean.code)
-  ]
+  const next = [clean, ...current.filter((item) => item.code !== clean.code)]
     .sort((left, right) => right.lastJoinedAt - left.lastJoinedAt)
-    .slice(0, 8)
+    .slice(0, MAX_RECENT_PRIVATE_ROOMS)
 
   window.localStorage.setItem(RECENT_PRIVATE_ROOMS_KEY, JSON.stringify(next))
   return next

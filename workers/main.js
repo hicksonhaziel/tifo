@@ -596,7 +596,7 @@ function persistEvent(event) {
     })
 }
 
-async function handleJoinRoom(room) {
+async function handleJoinRoom(room, cachedEvents = []) {
   await mailbox.rememberRooms([room])
   broadcastMailboxWant()
 
@@ -606,12 +606,14 @@ async function handleJoinRoom(room) {
   const migratedEvents = await migrateLegacyRoomEvents(room, storedEvents)
   const mailboxEvents = await mailbox.eventsForRoom(room)
   const seen = new Set(migratedEvents.map((event) => event.id))
-  for (const event of mailboxEvents) {
+  const recoveryEvents = [...mailboxEvents, ...cleanCachedJoinEvents(cachedEvents, room)]
+  for (const event of recoveryEvents) {
     if (seen.has(event.id)) continue
     seen.add(event.id)
     await echoTimeline.append(event)
+    if (event.type !== 'system') await mailbox.createEventEnvelope(room, event).catch(() => null)
   }
-  const mergedEvents = mailboxEvents.length > 0 ? await echoTimeline.readAll() : migratedEvents
+  const mergedEvents = recoveryEvents.length > 0 ? await echoTimeline.readAll() : migratedEvents
   for (const event of mergedEvents) mailbox.rememberContactFromEvent(event)
   await mailbox.persist().catch(() => {})
 
@@ -622,6 +624,18 @@ async function handleJoinRoom(room) {
     joinRoomNetwork(room)
   }
   return mergedEvents
+}
+
+function cleanCachedJoinEvents(events, room) {
+  if (!Array.isArray(events) || !room?.code) return []
+
+  const cleanRoomCode = String(room.code)
+  return events
+    .filter((event) => event && typeof event === 'object')
+    .filter((event) => event.room === cleanRoomCode && event.type !== 'system')
+    .filter((event) => typeof event.id === 'string' && event.id.trim())
+    .filter((event) => event.payload && typeof event.payload === 'object')
+    .slice(0, 180)
 }
 
 async function handleLeaveRoom() {

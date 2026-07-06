@@ -353,7 +353,7 @@ function createTifoRoomState(options = {}) {
     state.events = []
     state.seenEventIds.clear()
 
-    const storedEvents = await onJoinRoom(state.room)
+    const storedEvents = await onJoinRoom(state.room, command.cachedEvents)
     mergeStoredEvents(storedEvents, { notify: false })
 
     const event = createEvent('system', {

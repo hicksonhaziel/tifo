@@ -42,9 +42,12 @@ import {
 } from '../tifo/domain.js'
 import {
   addNotification,
+  loadNotificationReadAt,
   markNotificationsRead,
-  notificationForEvent
+  notificationForEvent,
+  saveNotificationReadAt
 } from '../tifo/notifications.js'
+import { loadCachedRoomEvents, mergeRoomEvents, saveCachedRoomEvents } from '../tifo/room-cache.js'
 import {
   imageFileSupported,
   imageMimeType,
@@ -76,10 +79,17 @@ import { formatReplayOffset } from '../tifo/format.js'
 export function useTifoController() {
   const [appState, setReactState] = useState(() => {
     const profile = loadLocalProfile()
-    return createInitialState({
+    const initialState = createInitialState({
       profile,
       recentPrivateRooms: loadRecentPrivateRooms(profile)
     })
+    return {
+      ...initialState,
+      notifications: {
+        ...initialState.notifications,
+        readAtByRoom: loadNotificationReadAt()
+      }
+    }
   })
   const stateRef = useRef(appState)
   const decoderRef = useRef(new TextDecoder('utf-8'))
@@ -182,10 +192,14 @@ export function useTifoController() {
       (latest, event) => Math.max(latest, Number.isFinite(event.timestamp) ? event.timestamp : 0),
       Date.now()
     )
-    setAppState((state) => ({
-      ...state,
-      notifications: markNotificationsRead(state.notifications, roomCode)
-    }))
+    setAppState((state) => {
+      const notifications = markNotificationsRead(state.notifications, roomCode, latestTimestamp)
+      saveNotificationReadAt(notifications.readAtByRoom)
+      return {
+        ...state,
+        notifications
+      }
+    })
     sendWorkerCommand('room:read', {
       readAt: latestTimestamp,
       roomCode
@@ -606,6 +620,7 @@ export function useTifoController() {
       const existingIndex = nextEvents.findIndex((item) => item.id === event.id)
       if (existingIndex >= 0) nextEvents.splice(existingIndex, 1)
       nextEvents.unshift(event)
+      saveCachedRoomEvents(event.room, nextEvents)
       return {
         ...state,
         events: nextEvents,
@@ -658,6 +673,12 @@ export function useTifoController() {
       case 'mailbox:conversation':
         if (message.room) rememberPrivateRoom(message.room)
         if (message.event) {
+          const roomEvents = mergeRoomEvents(
+            [message.event],
+            loadCachedRoomEvents(message.event.room),
+            message.event.room
+          )
+          saveCachedRoomEvents(message.event.room, roomEvents)
           const notification = notificationForIncomingEvent(message.event, stateRef.current, {
             roomTitle: message.room?.title || ''
           })
@@ -668,7 +689,8 @@ export function useTifoController() {
         }
         break
       case 'room:joined': {
-        const joinedEvents = message.events || []
+        const cachedEvents = loadCachedRoomEvents(message.room.code)
+        const joinedEvents = mergeRoomEvents(message.events || [], cachedEvents, message.room.code)
         seenEffectEventIdsRef.current.clear()
         rememberEffectEvents(joinedEvents)
         setAppState((state) => ({
@@ -716,6 +738,7 @@ export function useTifoController() {
         prefetchChantAudios(joinedEvents)
         prefetchChatMediaEvents(joinedEvents)
         prefetchClipVideos(joinedEvents)
+        saveCachedRoomEvents(message.room.code, joinedEvents)
         markCurrentRoomRead(message.room.code)
         break
       }
@@ -818,7 +841,14 @@ export function useTifoController() {
         upsertEvent(message.event)
         break
       case 'event:list': {
-        const events = message.events || []
+        const messageEvents = message.events || []
+        const messageRoomCode = messageEvents.find((event) => event?.room)?.room
+        if (messageRoomCode && messageRoomCode !== stateRef.current.roomCode) return
+        const events = mergeRoomEvents(
+          messageEvents,
+          stateRef.current.events,
+          stateRef.current.roomCode
+        )
         if (eventListSignature(stateRef.current.events) === eventListSignature(events)) return
         for (const event of events) {
           attachPendingChantUrl(event)
@@ -830,6 +860,7 @@ export function useTifoController() {
           ...state,
           events
         }))
+        saveCachedRoomEvents(stateRef.current.roomCode, events)
         prefetchChantAudios(events)
         prefetchChatMediaEvents(events)
         prefetchClipVideos(events)
@@ -2012,6 +2043,7 @@ export function useTifoController() {
     if (!targetRoomCode) return
     const publicRoom = availableRooms.find((item) => item.code === targetRoomCode)
     const roomTitle = targetRoom?.title || publicRoom?.title || targetRoomCode
+    const cachedEvents = loadCachedRoomEvents(targetRoomCode)
 
     if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom, { touch: false })
 
@@ -2023,8 +2055,8 @@ export function useTifoController() {
       roomKind: targetRoom?.kind || 'match',
       roomTitle,
       peerCount: 0,
-      syncStatus: 'Joining room',
-      events: [],
+      syncStatus: cachedEvents.length > 0 ? 'Loading latest messages' : 'Joining room',
+      events: cachedEvents,
       chatDraft: '',
       chatReply: null,
       typingUsers: [],
@@ -2052,9 +2084,11 @@ export function useTifoController() {
       effects: [],
       lastError: ''
     }))
+    markCurrentRoomRead(targetRoomCode)
 
     sendWorkerCommand('profile:set', { profile })
     sendWorkerCommand('room:join', {
+      cachedEvents,
       profile,
       room: targetRoom,
       roomCode: targetRoomCode
@@ -2158,10 +2192,14 @@ export function useTifoController() {
   }
 
   function markAllNotificationsRead() {
-    setAppState((state) => ({
-      ...state,
-      notifications: markNotificationsRead(state.notifications)
-    }))
+    setAppState((state) => {
+      const notifications = markNotificationsRead(state.notifications)
+      saveNotificationReadAt(notifications.readAtByRoom)
+      return {
+        ...state,
+        notifications
+      }
+    })
   }
 
   function sendReaction(reactionType) {
