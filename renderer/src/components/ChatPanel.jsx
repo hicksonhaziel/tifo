@@ -29,7 +29,7 @@ import {
   readReceiptLabel
 } from '../tifo/domain.js'
 import { formatBytes, formatDuration, formatTime } from '../tifo/format.js'
-import { avatarUrl } from './home/homeModel.js'
+import { profileAvatarForEvent } from './home/homeModel.js'
 import {
   FireGlyph,
   FoulGlyph,
@@ -937,7 +937,7 @@ function GeneratedChatItem({
 }) {
   const delivery = readReceiptLabel(event, state) || eventStatusLabel(event, state)
   const sender = event.sender || 'Fan'
-  const senderAvatar = avatarUrl(event.senderKey || sender)
+  const senderAvatar = profileAvatarForEvent(state, event)
   const voiceBubble =
     event.type === 'chat-media' && event.payload?.kind === 'voice' ? 'voice-bubble' : ''
 

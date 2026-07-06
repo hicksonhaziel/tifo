@@ -3,6 +3,7 @@ const crypto = require('hypercore-crypto')
 const IdentityKey = require('keet-identity-key')
 const sodium = require('sodium-universal')
 const { publicIdentityFields, signEvent, verifyEvent } = require('./tifo-event-signing')
+const { cleanAvatarDataUrl } = require('./tifo-profile')
 
 const path = requirePath()
 const fs = requireFs()
@@ -49,10 +50,13 @@ class TifoIdentity {
     const usernameChanged =
       this.identity.username !== profileInput.username ||
       this.identity.displayName !== profileInput.displayName
+    const avatarChanged =
+      !!profileInput.avatarDataUrl && this.identity.avatarDataUrl !== profileInput.avatarDataUrl
 
-    if (usernameChanged || !this.identity.profileProof) {
+    if (usernameChanged || avatarChanged || !this.identity.profileProof) {
       this.identity.username = profileInput.username
       this.identity.displayName = profileInput.displayName
+      if (profileInput.avatarDataUrl) this.identity.avatarDataUrl = profileInput.avatarDataUrl
       this.identity.updatedAt = this.now()
       this.identity.profileProof = profileProofForIdentity(this.identity)
       await this.persist()
@@ -65,6 +69,7 @@ class TifoIdentity {
     if (!this.identity) return null
 
     return {
+      avatarDataUrl: this.identity.avatarDataUrl || '',
       createdAt: this.identity.createdAt,
       displayName: this.identity.displayName,
       publicKey: this.identity.identityPublicKey,
@@ -105,6 +110,7 @@ async function createIdentity(profileInput, now) {
     devicePublicKey: b4a.toString(deviceKeyPair.publicKey, 'hex'),
     deviceSecretKey: b4a.toString(deviceKeyPair.secretKey, 'hex'),
     displayName: profileInput.displayName,
+    avatarDataUrl: profileInput.avatarDataUrl,
     identityPublicKey: b4a.toString(identity.identityPublicKey, 'hex'),
     mnemonic,
     profileDiscoveryPublicKey: b4a.toString(identity.profileDiscoveryPublicKey, 'hex'),
@@ -128,9 +134,11 @@ function profileProofForIdentity(identity) {
   const profileBytes = b4a.from(
     JSON.stringify({
       displayName: identity.displayName,
+      avatarDataUrl: identity.avatarDataUrl || '',
       devicePublicKey: identity.devicePublicKey,
       identityPublicKey: identity.identityPublicKey,
       profileDiscoveryPublicKey: identity.profileDiscoveryPublicKey,
+      updatedAt: identity.updatedAt,
       userId: identity.userId,
       username: identity.username
     })
@@ -141,6 +149,7 @@ function profileProofForIdentity(identity) {
 function cleanProfileInput(input = {}) {
   const username = cleanUsername(input.username || input.displayName || input.nickname)
   return {
+    avatarDataUrl: cleanAvatarDataUrl(input.avatarDataUrl),
     displayName: cleanDisplayName(input.displayName || input.nickname || username),
     username
   }
@@ -159,6 +168,7 @@ function sanitizeStoredIdentity(identity) {
     devicePublicKey: cleanHex(identity.devicePublicKey, 32),
     deviceSecretKey: cleanHex(identity.deviceSecretKey, 64),
     displayName,
+    avatarDataUrl: cleanAvatarDataUrl(identity.avatarDataUrl),
     identityPublicKey: cleanHex(identity.identityPublicKey || identity.publicKey, 32),
     mnemonic: typeof identity.mnemonic === 'string' ? identity.mnemonic : '',
     profileDiscoveryPublicKey: cleanHex(identity.profileDiscoveryPublicKey, 32),

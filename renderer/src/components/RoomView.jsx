@@ -3,7 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
 
 import chatBgSharp from './home/chat-bg-sharp.png'
-import { avatarUrl } from './home/homeModel.js'
+import { profileAvatarForName } from './home/homeModel.js'
 import { ChatPanel } from './ChatPanel.jsx'
 import { InviteModal } from './conversation/InviteModal.jsx'
 import { MatchRoomView } from './match/MatchRoomView.jsx'
@@ -22,6 +22,7 @@ export function RoomView({ controller }) {
     const memberCount = Math.max(1, state.peerCount + 1)
     const title = state.roomTitle || (isDm ? 'Direct message' : 'Private group')
     const accent = isDm ? '#B87A70' : '#7FA6D1'
+    const conversationAvatar = isDm ? profileAvatarForName(state, title, `${title}-dm`) : ''
 
     return (
       <main
@@ -33,6 +34,7 @@ export function RoomView({ controller }) {
         <div className='col grow' style={{ minHeight: 0 }}>
           <ConversationHeader
             accent={accent}
+            avatar={conversationAvatar}
             connected={connected}
             isDm={isDm}
             memberCount={memberCount}
@@ -77,6 +79,7 @@ export function RoomView({ controller }) {
 
 function ConversationHeader({
   accent,
+  avatar,
   connected,
   isDm,
   memberCount,
@@ -96,7 +99,7 @@ function ConversationHeader({
     <div className='content-header'>
       <div className='conversation-avatar avatar'>
         {isDm ? (
-          <img alt={title} src={avatarUrl(`${title}-dm`)} />
+          <img alt={title} src={avatar} />
         ) : (
           <div
             style={{

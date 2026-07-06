@@ -56,8 +56,10 @@ import {
   readImageDimensions
 } from '../tifo/media.js'
 import {
+  cleanAvatarDataUrl,
   createLocalProfile,
   loadLocalProfile,
+  normalizeUsername,
   profileName,
   saveLocalProfile
 } from '../tifo/identity.js'
@@ -76,6 +78,124 @@ import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/stat
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
 
+function cleanPublicProfileKey(value) {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return /^[0-9a-f]{64}$/.test(key) ? key : ''
+}
+
+function cleanUserId(value) {
+  const userId = typeof value === 'string' ? value.trim() : ''
+  return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
+}
+
+function cleanDisplayName(value, fallback = 'Fan') {
+  const name = String(value || fallback)
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 24)
+  return name || fallback
+}
+
+function cleanKnownProfile(profile) {
+  if (!profile || typeof profile !== 'object') return null
+
+  const identityPublicKey = cleanPublicProfileKey(profile.identityPublicKey || profile.publicKey)
+  const publicKey = cleanPublicProfileKey(profile.publicKey) || identityPublicKey
+  const userId = cleanUserId(profile.userId)
+  const username = normalizeUsername(profile.username || profile.displayName || profile.nickname)
+  const displayName = cleanDisplayName(profile.displayName || profile.nickname || username)
+  if (!publicKey && !identityPublicKey && !userId && !username) return null
+
+  const updatedAt = Number(profile.updatedAt)
+  return {
+    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
+    displayName,
+    identityPublicKey,
+    publicKey,
+    updatedAt: Number.isFinite(updatedAt) ? Math.max(0, Math.round(updatedAt)) : 0,
+    userId,
+    username,
+    verified: profile.verified === true
+  }
+}
+
+function knownProfileAliases(profile) {
+  const aliases = new Set()
+  if (profile.identityPublicKey) aliases.add(profile.identityPublicKey)
+  if (profile.publicKey) aliases.add(profile.publicKey)
+  if (profile.userId) aliases.add(profile.userId)
+  if (profile.username) aliases.add(`name:${profile.username}`)
+  const displayAlias = normalizeUsername(profile.displayName)
+  if (displayAlias) aliases.add(`name:${displayAlias}`)
+  return Array.from(aliases)
+}
+
+function mergeKnownProfile(previous, incoming) {
+  const previousUpdatedAt = previous?.updatedAt || 0
+  const incomingUpdatedAt = incoming.updatedAt || 0
+  const useIncomingAvatar =
+    !!incoming.avatarDataUrl && (!previous?.avatarDataUrl || incomingUpdatedAt >= previousUpdatedAt)
+
+  return {
+    ...previous,
+    ...incoming,
+    avatarDataUrl: useIncomingAvatar ? incoming.avatarDataUrl : previous?.avatarDataUrl || '',
+    updatedAt: Math.max(previousUpdatedAt, incomingUpdatedAt)
+  }
+}
+
+function knownProfileSignature(profile) {
+  if (!profile) return ''
+  return [
+    profile.avatarDataUrl || '',
+    profile.displayName || '',
+    profile.identityPublicKey || '',
+    profile.publicKey || '',
+    profile.updatedAt || 0,
+    profile.userId || '',
+    profile.username || '',
+    profile.verified === true ? '1' : '0'
+  ].join('|')
+}
+
+function mergeKnownProfiles(existing = {}, profiles = []) {
+  let next = existing || {}
+  let changed = false
+
+  for (const profile of profiles) {
+    const clean = cleanKnownProfile(profile)
+    if (!clean) continue
+
+    for (const alias of knownProfileAliases(clean)) {
+      const previous = next[alias]
+      const merged = mergeKnownProfile(previous, clean)
+      if (knownProfileSignature(previous) === knownProfileSignature(merged)) continue
+      if (!changed) next = { ...next }
+      next[alias] = merged
+      changed = true
+    }
+  }
+
+  return changed ? next : existing || {}
+}
+
+function profileFromEvent(event) {
+  if (!event || typeof event !== 'object') return null
+  return {
+    displayName: event.sender,
+    identityPublicKey: event.senderIdentityKey || event.senderKey || '',
+    publicKey: event.senderKey || event.senderIdentityKey || '',
+    updatedAt: Number.isFinite(event.timestamp) ? event.timestamp : 0,
+    userId: event.senderId || '',
+    username: event.sender
+  }
+}
+
+function profilesFromEvents(events = []) {
+  return events.map(profileFromEvent).filter(Boolean)
+}
+
 export function useTifoController() {
   const [appState, setReactState] = useState(() => {
     const profile = loadLocalProfile()
@@ -85,6 +205,7 @@ export function useTifoController() {
     })
     return {
       ...initialState,
+      knownProfiles: mergeKnownProfiles(initialState.knownProfiles, profile ? [profile] : []),
       notifications: {
         ...initialState.notifications,
         readAtByRoom: loadNotificationReadAt()
@@ -172,15 +293,37 @@ export function useTifoController() {
     })
   }
 
+  function withLocalProfileAvatar(profile, fallback = stateRef.current.profile) {
+    if (!profile) return profile
+    return {
+      ...profile,
+      avatarDataUrl: profile.avatarDataUrl || fallback?.avatarDataUrl || ''
+    }
+  }
+
+  function rememberKnownProfiles(profiles = []) {
+    setAppState((state) => {
+      const knownProfiles = mergeKnownProfiles(state.knownProfiles, profiles)
+      return knownProfiles === state.knownProfiles
+        ? state
+        : {
+            ...state,
+            knownProfiles
+          }
+    })
+  }
+
   function applyProfileReady(profile) {
     if (!profile?.publicKey) return
-    saveLocalProfile(profile)
-    const recentPrivateRooms = loadRecentPrivateRooms(profile)
+    const nextProfile = withLocalProfileAvatar(profile)
+    saveLocalProfile(nextProfile)
+    const recentPrivateRooms = loadRecentPrivateRooms(nextProfile)
     setAppState((state) => ({
       ...state,
       lastError: '',
-      nickname: profileName(profile),
-      profile,
+      nickname: profileName(nextProfile),
+      profile: nextProfile,
+      knownProfiles: mergeKnownProfiles(state.knownProfiles, [nextProfile]),
       recentPrivateRooms,
       view: state.view === 'welcome' ? 'home' : state.view
     }))
@@ -262,8 +405,10 @@ export function useTifoController() {
       const withoutUser = state.typingUsers.filter(
         (item) => item.user.publicKey !== message.user.publicKey
       )
+      const knownProfiles = mergeKnownProfiles(state.knownProfiles, [message.user])
       return {
         ...state,
+        knownProfiles,
         typingUsers:
           message.typing === false
             ? withoutUser
@@ -283,6 +428,7 @@ export function useTifoController() {
     if (!message?.room || !message.user?.publicKey) return
     setAppState((state) => ({
       ...state,
+      knownProfiles: mergeKnownProfiles(state.knownProfiles, [message.user]),
       readReceipts: {
         ...state.readReceipts,
         [message.room]: {
@@ -624,6 +770,7 @@ export function useTifoController() {
       return {
         ...state,
         events: nextEvents,
+        knownProfiles: mergeKnownProfiles(state.knownProfiles, profilesFromEvents([event])),
         notifications: addNotification(state.notifications, notification),
         lastError: ''
       }
@@ -670,6 +817,9 @@ export function useTifoController() {
         applyProfileReady(message.profile)
         syncWorkerMailbox()
         break
+      case 'profile:contacts':
+        rememberKnownProfiles(message.contacts || [])
+        break
       case 'mailbox:conversation':
         if (message.room) rememberPrivateRoom(message.room)
         if (message.event) {
@@ -684,6 +834,10 @@ export function useTifoController() {
           })
           setAppState((state) => ({
             ...state,
+            knownProfiles: mergeKnownProfiles(
+              state.knownProfiles,
+              profilesFromEvents([message.event])
+            ),
             notifications: addNotification(state.notifications, notification)
           }))
         }
@@ -693,45 +847,55 @@ export function useTifoController() {
         const joinedEvents = mergeRoomEvents(message.events || [], cachedEvents, message.room.code)
         seenEffectEventIdsRef.current.clear()
         rememberEffectEvents(joinedEvents)
-        setAppState((state) => ({
-          ...state,
-          view: 'room',
-          profile: message.profile || state.profile,
-          nickname: profileName(message.profile || state.profile),
-          roomCode: message.room.code,
-          roomInvite: message.room.invite || '',
-          roomKind: message.room.kind || 'match',
-          roomTitle: message.room.title,
-          peerCount: message.peerCount,
-          syncStatus: message.syncStatus,
-          events: joinedEvents,
-          chatDraft: '',
-          chatReply: null,
-          typingUsers: [],
-          chatMedia: {
-            imageError: '',
-            imageStatus: 'idle',
-            voiceElapsedMs: 0,
-            voiceError: '',
-            voiceStatus: 'idle'
-          },
-          clipDraft: clipDraftIdle(),
-          offline: {
-            detail: 'Network searching',
-            enabled: false,
-            lastFlushCount: 0,
-            pendingCount: 0,
-            pendingEventIds: new Set()
-          },
-          chantRecorder: {
-            elapsedMs: 0,
-            error: '',
-            status: 'idle'
-          },
-          replayPreview: replayIdleState(),
-          effects: [],
-          lastError: ''
-        }))
+        setAppState((state) => {
+          const joinedProfile = withLocalProfileAvatar(
+            message.profile || state.profile,
+            state.profile
+          )
+          return {
+            ...state,
+            view: 'room',
+            profile: joinedProfile,
+            knownProfiles: mergeKnownProfiles(state.knownProfiles, [
+              joinedProfile,
+              ...profilesFromEvents(joinedEvents)
+            ]),
+            nickname: profileName(joinedProfile),
+            roomCode: message.room.code,
+            roomInvite: message.room.invite || '',
+            roomKind: message.room.kind || 'match',
+            roomTitle: message.room.title,
+            peerCount: message.peerCount,
+            syncStatus: message.syncStatus,
+            events: joinedEvents,
+            chatDraft: '',
+            chatReply: null,
+            typingUsers: [],
+            chatMedia: {
+              imageError: '',
+              imageStatus: 'idle',
+              voiceElapsedMs: 0,
+              voiceError: '',
+              voiceStatus: 'idle'
+            },
+            clipDraft: clipDraftIdle(),
+            offline: {
+              detail: 'Network searching',
+              enabled: false,
+              lastFlushCount: 0,
+              pendingCount: 0,
+              pendingEventIds: new Set()
+            },
+            chantRecorder: {
+              elapsedMs: 0,
+              error: '',
+              status: 'idle'
+            },
+            replayPreview: replayIdleState(),
+            effects: [],
+            lastError: ''
+          }
+        })
         chantPrefetchIdsRef.current.clear()
         chatMediaPrefetchIdsRef.current.clear()
         clipPrefetchIdsRef.current.clear()
@@ -858,7 +1022,8 @@ export function useTifoController() {
         rememberEffectEvents(events)
         setAppState((state) => ({
           ...state,
-          events
+          events,
+          knownProfiles: mergeKnownProfiles(state.knownProfiles, profilesFromEvents(events))
         }))
         saveCachedRoomEvents(stateRef.current.roomCode, events)
         prefetchChantAudios(events)
@@ -1905,6 +2070,7 @@ export function useTifoController() {
         lastError: '',
         nickname: profileName(profile),
         profile,
+        knownProfiles: mergeKnownProfiles(state.knownProfiles, [profile]),
         recentPrivateRooms,
         view: 'home'
       }))

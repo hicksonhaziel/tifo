@@ -1,4 +1,5 @@
 import { roomInviteLabel } from '../../tifo/invites.js'
+import { normalizeUsername } from '../../tifo/identity.js'
 import { unreadCountForRoom } from '../../tifo/notifications.js'
 
 export function avatarUrl(seed) {
@@ -7,13 +8,49 @@ export function avatarUrl(seed) {
   )}&backgroundColor=1a1e22,22272c,2b3137&backgroundType=solid&radius=50`
 }
 
+export function profileAvatarUrl(profile, fallbackSeed = '') {
+  return profile?.avatarDataUrl || avatarUrl(fallbackSeed || profile?.username || 'fan')
+}
+
+export function knownProfileForKey(state, key) {
+  const cleanKey = cleanProfileLookupKey(key)
+  if (!cleanKey) return null
+  return state?.knownProfiles?.[cleanKey] || null
+}
+
+export function knownProfileForName(state, name) {
+  const username = normalizeUsername(name)
+  if (!username) return null
+  return state?.knownProfiles?.[`name:${username}`] || null
+}
+
+export function knownProfileForEvent(state, event) {
+  return (
+    knownProfileForKey(state, event?.senderIdentityKey) ||
+    knownProfileForKey(state, event?.senderKey) ||
+    knownProfileForKey(state, event?.senderId) ||
+    knownProfileForName(state, event?.sender)
+  )
+}
+
+export function profileAvatarForEvent(state, event) {
+  return profileAvatarUrl(
+    knownProfileForEvent(state, event),
+    event?.senderKey || event?.senderIdentityKey || event?.senderId || event?.sender || 'fan'
+  )
+}
+
+export function profileAvatarForName(state, name, fallbackSeed = '') {
+  return profileAvatarUrl(knownProfileForName(state, name), fallbackSeed || name || 'fan')
+}
+
 export function displayName(profile) {
-  const username = profile?.displayName || profile?.username || 'haziel'
+  const username = profile?.displayName || profile?.username || 'fan'
   return username.slice(0, 1).toUpperCase() + username.slice(1)
 }
 
 export function usernameLabel(profile) {
-  return profile?.username || 'haziel'
+  return profile?.username || 'username'
 }
 
 export function roomTitle(room) {
@@ -49,10 +86,11 @@ export function recentChatRows(state) {
     const unread = unreadCountForRoom(state.notifications, room.code)
     const isDm = room.kind === 'dm' || room.type === 'dm'
     const title = isDm ? dmTitle(room, state.profile) : room.title || room.name || 'Private group'
+    const dmProfile = isDm ? knownProfileForName(state, title) : null
 
     return {
       accent: isDm ? '#B87A70' : '#7FA6D1',
-      avatar: isDm ? avatarUrl(`${title}-dm`) : '',
+      avatar: isDm ? profileAvatarUrl(dmProfile, `${title}-dm`) : '',
       key: room.code,
       last: unread > 0 ? `${unread} unread` : roomInviteLabel(room),
       room,
@@ -62,6 +100,12 @@ export function recentChatRows(state) {
       unread
     }
   })
+}
+
+function cleanProfileLookupKey(value) {
+  const key = typeof value === 'string' ? value.trim() : ''
+  if (!key) return ''
+  return /^[0-9a-f]{64}$/i.test(key) ? key.toLowerCase() : key
 }
 
 function dmTitle(room, profile) {

@@ -35,7 +35,7 @@ import { ReplayPreview } from '../ReplayPreview.jsx'
 import '../conversation/generatedConversation.css'
 import { BallAvatar } from '../home/BallAvatar.jsx'
 import chatBgSharp from '../home/chat-bg-sharp.png'
-import { avatarUrl } from '../home/homeModel.js'
+import { knownProfileForKey, knownProfileForName, profileAvatarUrl } from '../home/homeModel.js'
 import { ReactionGlyph } from './FlareGlyphs.jsx'
 import './generatedMatch.css'
 
@@ -73,7 +73,7 @@ export function MatchRoomView({ controller }) {
         return right.localCreatedAt - left.localCreatedAt
       })
   }, [state.events])
-  const fans = useMemo(() => knownFans(state), [state.events, state.profile])
+  const fans = useMemo(() => knownFans(state), [state.events, state.knownProfiles, state.profile])
   const inviteLink = state.roomInvite || state.roomCode
 
   return (
@@ -331,7 +331,7 @@ function FansTab({ actions, fans, state }) {
       {fans.map((fan) => (
         <div className='match-fan-row' key={fan.id}>
           <div className='avatar'>
-            <img alt={`@${fan.name}`} src={avatarUrl(fan.key || fan.name)} />
+            <img alt={`@${fan.name}`} src={profileAvatarUrl(fan, fan.key || fan.name)} />
             <span>{fan.name.slice(0, 1).toUpperCase()}</span>
           </div>
           <div className='col grow'>
@@ -500,6 +500,7 @@ function knownFans(state) {
   if (profile) {
     fans.set(selfKey || selfName, {
       eventCount: 0,
+      avatarDataUrl: profile.avatarDataUrl || '',
       id: selfKey || selfName,
       key: selfKey,
       lastSeen: Date.now(),
@@ -512,13 +513,15 @@ function knownFans(state) {
     const name = String(event.sender || '').trim()
     if (!name) continue
     const key = event.senderKey || event.senderIdentityKey || event.senderId || name
+    const knownProfile = knownProfileForKey(state, key) || knownProfileForName(state, name)
     const existing = fans.get(key)
     fans.set(key, {
       eventCount: (existing?.eventCount || 0) + 1,
+      avatarDataUrl: knownProfile?.avatarDataUrl || existing?.avatarDataUrl || '',
       id: key,
       key: event.senderKey || event.senderIdentityKey || '',
       lastSeen: Math.max(existing?.lastSeen || 0, event.timestamp || 0),
-      name,
+      name: knownProfile?.username || name,
       self: existing?.self || (!!selfKey && key === selfKey)
     })
   }

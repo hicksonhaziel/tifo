@@ -1,3 +1,5 @@
+const { cleanAvatarDataUrl } = require('./tifo-profile')
+
 function createTifoRoomState(options = {}) {
   const send = options.send
   const now = options.now || Date.now
@@ -73,6 +75,7 @@ function createTifoRoomState(options = {}) {
   function emptyProfile() {
     return {
       displayName: '',
+      avatarDataUrl: '',
       deviceProof: '',
       devicePublicKey: '',
       identityPublicKey: '',
@@ -319,6 +322,7 @@ function createTifoRoomState(options = {}) {
       deviceProof: cleanBase64(source.deviceProof, 4096),
       devicePublicKey: cleanPublicKey(source.devicePublicKey),
       displayName,
+      avatarDataUrl: cleanAvatarDataUrl(source.avatarDataUrl),
       identityPublicKey: cleanPublicKey(source.identityPublicKey || source.publicKey),
       nickname: displayName,
       profileDiscoveryPublicKey: cleanPublicKey(source.profileDiscoveryPublicKey),

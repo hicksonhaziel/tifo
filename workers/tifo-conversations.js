@@ -1,3 +1,5 @@
+const { cleanAvatarDataUrl } = require('./tifo-profile')
+
 function createConversationState(options = {}) {
   const now = options.now || Date.now
   const typingTtlMs = options.typingTtlMs || 4500
@@ -6,6 +8,7 @@ function createConversationState(options = {}) {
   function typingMessage(room, profile, typing = true) {
     if (!room?.code || !profile?.publicKey) return null
     return {
+      avatarDataUrl: profile.avatarDataUrl || '',
       displayName: profile.displayName || profile.username || 'Fan',
       publicKey: profile.publicKey,
       room: room.code,
@@ -24,6 +27,7 @@ function createConversationState(options = {}) {
     reads.set(key, nextReadAt)
 
     return {
+      avatarDataUrl: profile.avatarDataUrl || '',
       displayName: profile.displayName || profile.username || 'Fan',
       publicKey: profile.publicKey,
       readAt: nextReadAt,
@@ -64,6 +68,7 @@ function createConversationState(options = {}) {
     if (!publicKey) return null
 
     return {
+      avatarDataUrl: cleanAvatarDataUrl(message.avatarDataUrl),
       displayName:
         typeof message.displayName === 'string' && message.displayName.trim()
           ? message.displayName.trim().slice(0, 24)

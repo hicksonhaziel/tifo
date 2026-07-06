@@ -4,8 +4,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { BallAvatar } from './BallAvatar.jsx'
 import { MenuButton, SearchInput, TextField } from './HomeSearchInput.jsx'
 import {
-  avatarUrl,
   displayName,
+  profileAvatarUrl,
   roomRound,
   roomTitle,
   searchChats,
@@ -52,7 +52,7 @@ export function HomeSidebar({
     <aside className='sidebar'>
       <div className='identity'>
         <div className='avatar'>
-          <img alt={`@${username}`} src={avatarUrl(`${username}-9`)} />
+          <img alt={`@${username}`} src={profileAvatarUrl(profile, `${username}-9`)} />
         </div>
         <div className='grow col' style={{ minWidth: 0 }}>
           <div className='row aic between'>

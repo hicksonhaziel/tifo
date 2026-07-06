@@ -31,6 +31,7 @@ export function createInitialState(options = {}) {
   return {
     view: profile ? 'home' : 'welcome',
     profile,
+    knownProfiles: {},
     nickname: profile?.displayName || profile?.username || '',
     roomCode: '',
     roomInvite: '',

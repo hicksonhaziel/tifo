@@ -3,6 +3,7 @@ const fs = requireFs()
 const b4a = require('b4a')
 const crypto = require('hypercore-crypto')
 const sodium = require('sodium-universal')
+const { cleanAvatarDataUrl } = require('./tifo-profile')
 
 const mailboxVersion = 1
 const maxEnvelopeCount = 1600
@@ -78,9 +79,15 @@ class TifoMailbox {
     const clean = cleanProfile(contact)
     if (!clean?.publicKey) return null
     const existing = this.contacts.get(clean.publicKey) || {}
+    const incomingUpdatedAt = clean.updatedAt || 0
+    const existingUpdatedAt = existing.updatedAt || 0
+    const useIncomingAvatar =
+      !!clean.avatarDataUrl && (!existing.avatarDataUrl || incomingUpdatedAt >= existingUpdatedAt)
     const next = {
       ...existing,
       ...clean,
+      avatarDataUrl: useIncomingAvatar ? clean.avatarDataUrl : existing.avatarDataUrl || '',
+      updatedAt: Math.max(existingUpdatedAt, incomingUpdatedAt),
       seenAt: this.now()
     }
     this.contacts.set(next.publicKey, next)
@@ -90,10 +97,11 @@ class TifoMailbox {
   }
 
   rememberContactFromEvent(event) {
-    if (!event?.senderKey) return null
+    const publicKey = event?.senderKey || event?.senderIdentityKey
+    if (!publicKey) return null
     return this.rememberContact({
       displayName: event.sender,
-      publicKey: event.senderKey,
+      publicKey,
       username: event.sender
     })
   }
@@ -109,6 +117,14 @@ class TifoMailbox {
 
   knownTopicHashes() {
     return Array.from(this.knownRooms.keys()).sort()
+  }
+
+  contactsList() {
+    return Array.from(this.contacts.values()).sort((left, right) => {
+      const seenDelta = (right.seenAt || 0) - (left.seenAt || 0)
+      if (seenDelta !== 0) return seenDelta
+      return (left.username || left.publicKey).localeCompare(right.username || right.publicKey)
+    })
   }
 
   topicHashForRoom(room) {
@@ -347,15 +363,27 @@ function cleanRoom(room) {
 function cleanProfile(profile) {
   if (!profile || typeof profile !== 'object') return null
   const publicKey =
-    typeof profile.publicKey === 'string' && /^[0-9a-f]{64}$/i.test(profile.publicKey.trim())
-      ? profile.publicKey.trim().toLowerCase()
+    typeof (profile.publicKey || profile.identityPublicKey) === 'string' &&
+    /^[0-9a-f]{64}$/i.test(String(profile.publicKey || profile.identityPublicKey).trim())
+      ? String(profile.publicKey || profile.identityPublicKey)
+          .trim()
+          .toLowerCase()
       : ''
   if (!publicKey) return null
 
   const username = cleanUsername(profile.username || profile.displayName || profile.nickname)
+  const displayName =
+    typeof profile.displayName === 'string' && profile.displayName.trim()
+      ? profile.displayName.trim().replace(/\s+/g, '_').slice(0, 24)
+      : username || 'fan'
+  const updatedAt = Number(profile.updatedAt)
   return {
-    displayName: username || 'fan',
+    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
+    displayName,
+    identityPublicKey: publicKey,
     publicKey,
+    updatedAt: Number.isFinite(updatedAt) ? Math.max(0, Math.round(updatedAt)) : 0,
+    userId: cleanUserId(profile.userId),
     username
   }
 }
@@ -397,6 +425,11 @@ function cleanUsername(value) {
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '')
     .slice(0, 20)
+}
+
+function cleanUserId(value) {
+  const userId = typeof value === 'string' ? value.trim() : ''
+  return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
 }
 
 function displayUsername(username) {

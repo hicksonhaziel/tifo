@@ -130,6 +130,7 @@ function chooseBaseKey(leftKey, rightKey) {
 function publicProfilesEqual(left, right) {
   if (!left || !right) return false
   return (
+    (left.avatarDataUrl || '') === (right.avatarDataUrl || '') &&
     left.publicKey === right.publicKey &&
     left.devicePublicKey === right.devicePublicKey &&
     left.profileProof === right.profileProof &&
@@ -276,6 +277,13 @@ function sendSyncDiagnostics(reason = '') {
       roomPeers,
       roomTopic: roomTopic ? b4a.toString(roomTopic, 'hex') : ''
     }),
+    reason
+  })
+}
+
+function sendKnownContacts(reason = '') {
+  send('profile:contacts', {
+    contacts: mailbox.contactsList(),
     reason
   })
 }
@@ -616,6 +624,7 @@ async function handleJoinRoom(room, cachedEvents = []) {
   const mergedEvents = recoveryEvents.length > 0 ? await echoTimeline.readAll() : migratedEvents
   for (const event of mergedEvents) mailbox.rememberContactFromEvent(event)
   await mailbox.persist().catch(() => {})
+  sendKnownContacts('room history')
 
   if (simulatedOffline) {
     send('sync:status', { status: 'Offline mode: local only' })
@@ -767,6 +776,8 @@ async function handleProfileSet(command) {
   const profile = await ensureWorkerProfile(command.profile)
   await mailbox.setProfile(profile)
   await roomState.handleCommand({ ...command, profile })
+  sendKnownContacts('profile ready')
+  sendAllPeerSnapshots()
   broadcastAppIdentity()
   broadcastMailboxWant()
   sendSyncDiagnostics('profile ready')
@@ -780,6 +791,7 @@ async function handleMailboxKnown(command) {
   const rooms = Array.isArray(command.rooms) ? command.rooms : []
   const topicHashes = await mailbox.setKnownRooms(rooms)
   await processKnownMailboxRecords(topicHashes).catch(() => {})
+  sendKnownContacts('mailbox known')
   broadcastAppIdentity()
   broadcastMailboxWant()
   sendSyncDiagnostics('mailbox known')
@@ -1795,7 +1807,8 @@ async function relayMailboxEvent(event) {
   const room = roomState.state.room
   if (!room || !event) return
 
-  mailbox.rememberContactFromEvent(event)
+  const contact = mailbox.rememberContactFromEvent(event)
+  if (contact) sendKnownContacts('room event contact')
   const envelope = await mailbox.createEventEnvelope(room, event)
   if (envelope) broadcastMailboxEnvelope(envelope)
 }
@@ -1867,7 +1880,8 @@ async function processMailboxRecord(record) {
   const event = record.payload.event
   if (!event?.id) return
 
-  mailbox.rememberContactFromEvent(event)
+  const contact = mailbox.rememberContactFromEvent(event)
+  if (contact) sendKnownContacts('mailbox event contact')
   announceMailboxConversation(record.room, event)
   if (roomState.state.room?.code !== event.room) return
 
@@ -1930,6 +1944,7 @@ async function handleAppPeerMessage(peer, message) {
     const contact = mailbox.rememberContact(message.profile)
     if (contact) {
       await mailbox.persist()
+      sendKnownContacts('app peer identity')
       sendMailboxWant(peer)
       broadcastMailboxWant()
     }
@@ -1968,6 +1983,11 @@ async function handlePeerMessage(peer, message) {
   if (message.type === 'identity') {
     const profile =
       message.profile && typeof message.profile === 'object' ? message.profile : { ...message }
+    const contact = mailbox.rememberContact(profile)
+    if (contact) {
+      await mailbox.persist()
+      sendKnownContacts('room peer identity')
+    }
     const nickname =
       typeof profile.displayName === 'string' && profile.displayName.trim()
         ? profile.displayName
@@ -2369,6 +2389,7 @@ pipe.on('data', async (data) => {
       const profile = await ensureWorkerProfile(command.profile || roomState.state.profile)
       await mailbox.setProfile(profile)
       await roomState.handleCommand({ ...command, profile })
+      sendKnownContacts('room joined')
       broadcastAppIdentity()
       broadcastMailboxWant()
       sendSyncDiagnostics('room joined')
@@ -2388,4 +2409,8 @@ send('app:ready', {
   appPeerCount: appPeers.size,
   syncStatus: 'Worker ready'
 })
+mailbox
+  .ready()
+  .then(() => sendKnownContacts('worker ready'))
+  .catch(() => {})
 sendSyncDiagnostics('worker ready')

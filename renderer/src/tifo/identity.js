@@ -22,8 +22,10 @@ export function createLocalProfile(input = {}) {
 
   const now = Date.now()
   const publicKey = randomHex(32)
+  const avatarDataUrl = cleanAvatarDataUrl(input.avatarDataUrl)
 
   return {
+    avatarDataUrl,
     createdAt: now,
     displayName: username,
     publicKey,
@@ -76,6 +78,7 @@ function sanitizeStoredProfile(profile) {
 
   return {
     createdAt: Number.isFinite(profile.createdAt) ? profile.createdAt : Date.now(),
+    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
     deviceProof: cleanProof(profile.deviceProof),
     devicePublicKey: cleanPublicKey(profile.devicePublicKey),
     displayName: username,
@@ -89,6 +92,13 @@ function sanitizeStoredProfile(profile) {
     username,
     version: Number.isFinite(profile.version) ? profile.version : 1
   }
+}
+
+export function cleanAvatarDataUrl(value) {
+  const dataUrl = typeof value === 'string' ? value.trim() : ''
+  if (!dataUrl) return ''
+  if (dataUrl.length > 260_000) return ''
+  return /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl) ? dataUrl : ''
 }
 
 function cleanPublicKey(value) {

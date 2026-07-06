@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion'
-import { ArrowRight, Check, Flag, Lock, Users } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ArrowRight, Camera, Check, Flag, Lock, Users } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 
 import { normalizeUsername } from '../../tifo/identity.js'
+import { profileAvatarFromFile } from '../../tifo/profile-avatar.js'
 import tifoLogoLockup from './tifo-logo-lockup.png'
 
 const entrance = {
@@ -38,11 +39,26 @@ const featureRows = [
 ]
 
 export function OnboardingView({ actions, state }) {
-  const [rawUsername, setRawUsername] = useState('haziel')
+  const fileInputRef = useRef(null)
+  const [rawUsername, setRawUsername] = useState('')
+  const [avatarDataUrl, setAvatarDataUrl] = useState('')
   const [localError, setLocalError] = useState('')
   const username = useMemo(() => normalizeUsername(rawUsername).slice(0, 16), [rawUsername])
   const ready = /^[a-z0-9_]{3,16}$/.test(username)
   const displayUsername = username || 'username'
+
+  async function chooseAvatar(event) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+
+    try {
+      setLocalError('')
+      setAvatarDataUrl(await profileAvatarFromFile(file))
+    } catch (err) {
+      setLocalError(err.message || 'Could not use that profile image')
+    }
+  }
 
   function submitForm(event) {
     event.preventDefault()
@@ -52,7 +68,7 @@ export function OnboardingView({ actions, state }) {
     }
 
     setLocalError('')
-    actions.createProfile({ username })
+    actions.createProfile({ avatarDataUrl, username })
   }
 
   return (
@@ -126,7 +142,7 @@ export function OnboardingView({ actions, state }) {
                 autoComplete='username'
                 autoFocus
                 maxLength='16'
-                placeholder='haziel'
+                placeholder='username'
                 value={rawUsername}
                 onChange={(event) => {
                   setRawUsername(normalizeUsername(event.currentTarget.value).slice(0, 16))
@@ -140,7 +156,14 @@ export function OnboardingView({ actions, state }) {
             </span>
           </label>
 
-          <ProfilePreview username={displayUsername} ready={ready} />
+          <ProfilePreview
+            avatarDataUrl={avatarDataUrl}
+            fileInputRef={fileInputRef}
+            onAvatarChange={chooseAvatar}
+            onChooseAvatar={() => fileInputRef.current?.click()}
+            ready={ready}
+            username={displayUsername}
+          />
 
           <motion.button
             className='mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-[#5B9078] bg-[#6FA890] px-5 text-[14px] font-bold text-[#0F1113] shadow-[0_6px_20px_-8px_rgba(111,168,144,0.45),inset_0_1px_0_rgba(255,255,255,0.12)] transition hover:bg-[#5B9078] disabled:cursor-not-allowed disabled:opacity-45'
@@ -186,8 +209,15 @@ function FeatureRow({ feature, index }) {
   )
 }
 
-function ProfilePreview({ username, ready }) {
-  const avatar = avatarUrl(username || 'preview')
+function ProfilePreview({
+  avatarDataUrl,
+  fileInputRef,
+  onAvatarChange,
+  onChooseAvatar,
+  ready,
+  username
+}) {
+  const avatar = avatarDataUrl || avatarUrl(username || 'preview')
 
   return (
     <div className='mt-6'>
@@ -196,9 +226,24 @@ function ProfilePreview({ username, ready }) {
       </span>
       <div className='mt-2 rounded-xl border border-white/[0.09] bg-[#0F1113] p-3.5'>
         <div className='flex items-center gap-3'>
-          <div className='flex h-[42px] w-[42px] shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.09] bg-[linear-gradient(135deg,#2a2e33,#16191b)]'>
+          <button
+            className='group relative flex h-[46px] w-[46px] shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.12] bg-[linear-gradient(135deg,#2a2e33,#16191b)] outline-none transition hover:border-[#B8D4C6]/50 focus-visible:ring-4 focus-visible:ring-[#6FA890]/20'
+            type='button'
+            onClick={onChooseAvatar}
+            title='Choose profile picture'
+          >
             <img className='block h-full w-full object-cover' src={avatar} alt='' />
-          </div>
+            <span className='absolute inset-0 flex items-center justify-center bg-black/42 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100'>
+              <Camera size={16} strokeWidth={2.4} className='text-[#F1EEE8]' />
+            </span>
+          </button>
+          <input
+            accept='image/png,image/jpeg,image/webp'
+            className='sr-only'
+            onChange={onAvatarChange}
+            ref={fileInputRef}
+            type='file'
+          />
           <div className='min-w-0 flex-1'>
             <div className='flex min-w-0 items-center gap-2'>
               <span className='truncate text-[14px] font-semibold text-[#F1EEE8]'>@{username}</span>
@@ -213,7 +258,7 @@ function ProfilePreview({ username, ready }) {
           </span>
         </div>
 
-        <div className='ml-[54px] mt-2 inline-flex rounded-[4px_12px_12px_12px] border border-white/[0.05] bg-[#22272C] px-3 py-1.5 text-[13.5px] text-[#F1EEE8]'>
+        <div className='ml-[58px] mt-2 inline-flex rounded-[4px_12px_12px_12px] border border-white/[0.05] bg-[#22272C] px-3 py-1.5 text-[13.5px] text-[#F1EEE8]'>
           {ready ? 'Welcome to the terrace.' : 'Choose your name.'}
         </div>
       </div>
