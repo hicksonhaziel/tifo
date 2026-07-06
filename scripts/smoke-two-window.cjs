@@ -34,10 +34,13 @@ async function main() {
       title: 'Nigeria vs Ghana'
     }
     let aliceLocalEvent = null
+    const aliceEvents = []
     const aliceRoom = createTifoRoomState({
       onJoinRoom: () => [],
+      onChatMediaSave: ({ bytesBase64, localPath, roomCode, ...payload }) => payload,
       onLocalEvent: (event) => {
         aliceLocalEvent = event
+        aliceEvents.push(event)
       },
       send: () => {},
       signEvent: (event) => aliceIdentity.signEvent(event),
@@ -63,6 +66,80 @@ async function main() {
     assert.equal(remoteEvent.verified, true)
     assert.equal(remoteEvent.senderKey, alice.publicKey)
     assert.equal(remoteEvent.payload.text, 'hello from hickson')
+
+    await aliceRoom.handleCommand({
+      bytesBase64: Buffer.from('fake-image').toString('base64'),
+      clientId: 'image-client',
+      height: 1,
+      kind: 'image',
+      mediaRef: 'image-ref',
+      mimeType: 'image/png',
+      size: 10,
+      type: 'chat-media:save',
+      width: 1
+    })
+    const imageEvent = aliceEvents.find((event) => event.payload?.mediaRef === 'image-ref')
+    assert.equal(imageEvent.type, 'chat-media')
+    assert.equal(imageEvent.payload.kind, 'image')
+    assert.equal(imageEvent.verified, true)
+    const remoteImageEvent = bobRoom.addRemoteEvent(imageEvent)
+    assert.equal(remoteImageEvent.payload.kind, 'image')
+    assert.equal(remoteImageEvent.verified, true)
+
+    await aliceRoom.handleCommand({
+      bytesBase64: Buffer.from('fake-voice').toString('base64'),
+      clientId: 'voice-client',
+      durationMs: 1200,
+      kind: 'voice',
+      mediaRef: 'voice-ref',
+      mimeType: 'audio/webm',
+      size: 10,
+      type: 'chat-media:save'
+    })
+    const voiceEvent = aliceEvents.find((event) => event.payload?.mediaRef === 'voice-ref')
+    assert.equal(voiceEvent.type, 'chat-media')
+    assert.equal(voiceEvent.payload.kind, 'voice')
+    assert.equal(voiceEvent.verified, true)
+    const remoteVoiceEvent = bobRoom.addRemoteEvent(voiceEvent)
+    assert.equal(remoteVoiceEvent.payload.kind, 'voice')
+    assert.equal(remoteVoiceEvent.verified, true)
+
+    const delayedEvents = []
+    const delayedRoom = createTifoRoomState({
+      onChatMediaSave: ({ bytesBase64, localPath, roomCode, ...payload }) =>
+        new Promise((resolve) => setTimeout(() => resolve(payload), 40)),
+      onJoinRoom: () => [],
+      onLocalEvent: (event) => delayedEvents.push(event),
+      send: () => {},
+      signEvent: (event) => aliceIdentity.signEvent(event),
+      verifyEvent: (event) => aliceIdentity.verifyEvent(event)
+    })
+    await delayedRoom.handleCommand({ profile: alice, room, type: 'room:join' })
+    const delayedMedia = delayedRoom.handleCommand({
+      bytesBase64: Buffer.from('slow-image').toString('base64'),
+      clientId: 'slow-image-client',
+      height: 1,
+      kind: 'image',
+      mediaRef: 'slow-image-ref',
+      mimeType: 'image/png',
+      size: 10,
+      type: 'chat-media:save',
+      width: 1
+    })
+    await delayedRoom.handleCommand({ text: 'text after slow media', type: 'chat:send' })
+    assert.equal(
+      delayedEvents.some(
+        (event) => event.type === 'chat' && event.payload.text === 'text after slow media'
+      ),
+      true
+    )
+    await delayedMedia
+    assert.equal(
+      delayedEvents.some(
+        (event) => event.type === 'chat-media' && event.payload.mediaRef === 'slow-image-ref'
+      ),
+      true
+    )
 
     const aliceMailbox = new TifoMailbox({ dir: path.join(root, 'alice-mailbox') })
     const bobMailbox = new TifoMailbox({ dir: path.join(root, 'bob-mailbox') })

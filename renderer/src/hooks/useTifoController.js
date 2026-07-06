@@ -78,6 +78,15 @@ import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/stat
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
 
+const desktopNotificationSeenKey = 'tifo:desktop-notifications-seen:v1'
+const maxDesktopNotificationSeen = 240
+
+function cleanRoomCode(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+}
+
 function cleanPublicProfileKey(value) {
   const key = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return /^[0-9a-f]{64}$/.test(key) ? key : ''
@@ -196,6 +205,22 @@ function profilesFromEvents(events = []) {
   return events.map(profileFromEvent).filter(Boolean)
 }
 
+function loadDesktopNotificationIds() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(desktopNotificationSeenKey) || '[]')
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDesktopNotificationIds(ids) {
+  try {
+    const keep = Array.from(ids).slice(-maxDesktopNotificationSeen)
+    window.localStorage.setItem(desktopNotificationSeenKey, JSON.stringify(keep))
+  } catch {}
+}
+
 export function useTifoController() {
   const [appState, setReactState] = useState(() => {
     const profile = loadLocalProfile()
@@ -229,7 +254,8 @@ export function useTifoController() {
   const pendingChatMediaPreviewsRef = useRef(new Map())
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
-  const desktopNotificationIdsRef = useRef(new Set())
+  const desktopNotificationIdsRef = useRef(loadDesktopNotificationIds())
+  const pendingRoomCodeRef = useRef('')
   const seenEffectEventIdsRef = useRef(new Set())
   const typingSentAtRef = useRef(0)
   const typingCleanupTimerRef = useRef(null)
@@ -263,7 +289,41 @@ export function useTifoController() {
   }
 
   function sendWorkerCommand(type, payload = {}) {
-    return workerClientRef.current?.send(type, payload)
+    const pending = workerClientRef.current?.send(type, payload)
+    pending?.catch?.((err) => {
+      if (!mountedRef.current) return
+      setAppState((state) => ({
+        ...state,
+        lastError: err.message || `Could not send ${type} to worker`
+      }))
+    })
+    return pending
+  }
+
+  function activeRoomCode() {
+    if (stateRef.current.view !== 'room') return ''
+    return cleanRoomCode(stateRef.current.roomCode)
+  }
+
+  function roomIsActive(roomCode = stateRef.current.roomCode) {
+    const currentRoomCode = activeRoomCode()
+    const targetRoomCode = cleanRoomCode(roomCode)
+    return !!targetRoomCode && currentRoomCode === targetRoomCode
+  }
+
+  function setRoomPending(roomCode) {
+    pendingRoomCodeRef.current = cleanRoomCode(roomCode)
+  }
+
+  function setRoomReady(roomCode) {
+    const cleanCode = cleanRoomCode(roomCode)
+    if (pendingRoomCodeRef.current && pendingRoomCodeRef.current !== cleanCode) return false
+    pendingRoomCodeRef.current = ''
+    return true
+  }
+
+  function clearRoomReady() {
+    pendingRoomCodeRef.current = ''
   }
 
   function knownMailboxRooms(state = stateRef.current) {
@@ -329,7 +389,7 @@ export function useTifoController() {
     }))
   }
 
-  function markCurrentRoomRead(roomCode = stateRef.current.roomCode) {
+  function markCurrentRoomRead(roomCode = stateRef.current.roomCode, options = {}) {
     if (!roomCode) return
     const latestTimestamp = stateRef.current.events.reduce(
       (latest, event) => Math.max(latest, Number.isFinite(event.timestamp) ? event.timestamp : 0),
@@ -343,10 +403,12 @@ export function useTifoController() {
         notifications
       }
     })
-    sendWorkerCommand('room:read', {
-      readAt: latestTimestamp,
-      roomCode
-    })
+    if (options.announce !== false && roomIsActive(roomCode)) {
+      sendWorkerCommand('room:read', {
+        readAt: latestTimestamp,
+        roomCode
+      })
+    }
   }
 
   function appIsBackgrounded() {
@@ -361,6 +423,7 @@ export function useTifoController() {
     if (notification.read === true && !appIsBackgrounded()) return
 
     desktopNotificationIdsRef.current.add(notification.id)
+    saveDesktopNotificationIds(desktopNotificationIdsRef.current)
     window.bridge
       ?.showNotification?.({
         body: notification.body,
@@ -544,21 +607,25 @@ export function useTifoController() {
 
   function requestChantLoad(event, options = {}) {
     if (chantAudioUrlsRef.current.has(event.id)) return
+    if (!roomIsActive(event?.room)) return
     sendWorkerCommand('chant:load', {
       eventId: event.id,
       fileId: event.payload.fileId,
       mimeType: event.payload.mimeType,
+      roomCode: event.room,
       silent: options.silent === true
     })
   }
 
   function requestChatMediaLoad(event, options = {}) {
     if (chatMediaUrlsRef.current.has(event.id)) return
+    if (!roomIsActive(event?.room)) return
     sendWorkerCommand('chat-media:load', {
       eventId: event.id,
       kind: event.payload.kind,
       mediaRef: event.payload.mediaRef,
       mimeType: event.payload.mimeType,
+      roomCode: event.room,
       silent: options.silent === true,
       size: event.payload.size
     })
@@ -566,10 +633,12 @@ export function useTifoController() {
 
   function requestClipLoad(event, options = {}) {
     if (clipPreviewUrlForEvent(event)) return
+    if (!roomIsActive(event?.room)) return
     sendWorkerCommand('clip:load', {
       clipRef: event.payload.clipRef,
       eventId: event.id,
       mimeType: event.payload.mimeType,
+      roomCode: event.room,
       silent: options.silent === true,
       size: event.payload.size
     })
@@ -579,6 +648,7 @@ export function useTifoController() {
     if (chantAudioUrlsRef.current.has(event.id)) {
       return Promise.resolve(chantAudioUrlsRef.current.get(event.id))
     }
+    if (!roomIsActive(event?.room)) return Promise.resolve('')
     if (!event.payload?.fileId) return Promise.resolve('')
     if (pendingChantLoadsRef.current.has(event.id)) {
       return pendingChantLoadsRef.current.get(event.id).promise
@@ -612,6 +682,7 @@ export function useTifoController() {
     if (chatMediaUrlsRef.current.has(event.id)) {
       return Promise.resolve(chatMediaUrlsRef.current.get(event.id))
     }
+    if (!roomIsActive(event?.room)) return Promise.resolve('')
     if (!event.payload?.mediaRef) return Promise.resolve('')
     if (pendingChatMediaLoadsRef.current.has(event.id)) {
       return pendingChatMediaLoadsRef.current.get(event.id).promise
@@ -644,6 +715,7 @@ export function useTifoController() {
   function loadClipVideo(event, options = {}) {
     const existingUrl = clipPreviewUrlForEvent(event)
     if (existingUrl) return Promise.resolve(existingUrl)
+    if (!roomIsActive(event?.room)) return Promise.resolve('')
     if (!event.payload?.clipRef) return Promise.resolve('')
     if (pendingClipLoadsRef.current.has(event.id)) {
       return pendingClipLoadsRef.current.get(event.id).promise
@@ -752,6 +824,22 @@ export function useTifoController() {
   }
 
   function upsertEvent(event) {
+    if (!event?.room) return
+
+    const visibleRoom = stateRef.current.view === 'room' && stateRef.current.roomCode === event.room
+    const cachedEvents = mergeRoomEvents([event], loadCachedRoomEvents(event.room), event.room)
+    saveCachedRoomEvents(event.room, cachedEvents)
+
+    if (!visibleRoom) {
+      const notification = notificationForIncomingEvent(event)
+      setAppState((state) => ({
+        ...state,
+        knownProfiles: mergeKnownProfiles(state.knownProfiles, profilesFromEvents([event])),
+        notifications: addNotification(state.notifications, notification)
+      }))
+      return
+    }
+
     attachPendingChantUrl(event)
     attachPendingChatMediaPreview(event)
     attachPendingClipPreview(event)
@@ -766,10 +854,11 @@ export function useTifoController() {
       const existingIndex = nextEvents.findIndex((item) => item.id === event.id)
       if (existingIndex >= 0) nextEvents.splice(existingIndex, 1)
       nextEvents.unshift(event)
-      saveCachedRoomEvents(event.room, nextEvents)
+      const roomEvents = mergeRoomEvents(nextEvents, cachedEvents, event.room)
+      saveCachedRoomEvents(event.room, roomEvents)
       return {
         ...state,
-        events: nextEvents,
+        events: roomEvents,
         knownProfiles: mergeKnownProfiles(state.knownProfiles, profilesFromEvents([event])),
         notifications: addNotification(state.notifications, notification),
         lastError: ''
@@ -843,6 +932,7 @@ export function useTifoController() {
         }
         break
       case 'room:joined': {
+        if (!message.room?.code || !setRoomReady(message.room.code)) return
         const cachedEvents = loadCachedRoomEvents(message.room.code)
         const joinedEvents = mergeRoomEvents(message.events || [], cachedEvents, message.room.code)
         seenEffectEventIdsRef.current.clear()
@@ -907,6 +997,7 @@ export function useTifoController() {
         break
       }
       case 'room:left':
+        clearRoomReady()
         setAppState((state) => ({
           ...state,
           view: state.profile ? 'home' : 'welcome',
@@ -957,7 +1048,7 @@ export function useTifoController() {
           ...state,
           peerCount: message.count
         }))
-        if (message.count > 0) {
+        if (message.count > 0 && roomIsActive()) {
           prefetchChantAudios(stateRef.current.events)
           prefetchChatMediaEvents(stateRef.current.events)
           prefetchClipVideos(stateRef.current.events)
@@ -1001,13 +1092,13 @@ export function useTifoController() {
         break
       }
       case 'event:added':
-        triggerReactionEffect(message.event)
+        if (message.event?.room === stateRef.current.roomCode) triggerReactionEffect(message.event)
         upsertEvent(message.event)
         break
       case 'event:list': {
         const messageEvents = message.events || []
-        const messageRoomCode = messageEvents.find((event) => event?.room)?.room
-        if (messageRoomCode && messageRoomCode !== stateRef.current.roomCode) return
+        const messageRoomCode = message.room || messageEvents.find((event) => event?.room)?.room
+        if (!messageRoomCode || messageRoomCode !== stateRef.current.roomCode) return
         const events = mergeRoomEvents(
           messageEvents,
           stateRef.current.events,
@@ -1074,6 +1165,19 @@ export function useTifoController() {
   }
 
   async function saveChantBlob({ blob, durationMs, mimeType }) {
+    const roomCode = activeRoomCode()
+    if (!roomCode) {
+      setAppState((state) => ({
+        ...state,
+        chantRecorder: {
+          ...state.chantRecorder,
+          error: 'Open a match room before saving a chant',
+          status: 'error'
+        }
+      }))
+      return
+    }
+
     const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
     pendingChantUrlsRef.current.set(clientId, URL.createObjectURL(blob))
     const bytesBase64 = await blobToBase64(blob)
@@ -1091,7 +1195,8 @@ export function useTifoController() {
       bytesBase64,
       clientId,
       durationMs,
-      mimeType
+      mimeType,
+      roomCode
     })
   }
 
@@ -1135,6 +1240,18 @@ export function useTifoController() {
   }
 
   async function startChantRecording() {
+    if (!activeRoomCode()) {
+      setAppState((state) => ({
+        ...state,
+        chantRecorder: {
+          elapsedMs: 0,
+          error: 'Open a match room before recording a chant',
+          status: 'error'
+        }
+      }))
+      return
+    }
+
     if (!recordingSupported()) {
       setAppState((state) => ({
         ...state,
@@ -1181,7 +1298,7 @@ export function useTifoController() {
         })
       })
 
-      recorder.start()
+      recorder.start(250)
       setAppState((state) => ({
         ...state,
         chantRecorder: {
@@ -1239,7 +1356,12 @@ export function useTifoController() {
 
     if (options.discard) {
       discardActiveChantRef.current = true
-      if (recorder.state !== 'inactive') recorder.stop()
+      if (recorder.state !== 'inactive') {
+        try {
+          recorder.requestData?.()
+        } catch {}
+        recorder.stop()
+      }
       return
     }
 
@@ -1265,7 +1387,12 @@ export function useTifoController() {
         status: 'saving'
       }
     }))
-    if (recorder.state !== 'inactive') recorder.stop()
+    if (recorder.state !== 'inactive') {
+      try {
+        recorder.requestData?.()
+      } catch {}
+      recorder.stop()
+    }
   }
 
   async function finalizeChantRecording({ chunks, durationMs, mimeType }) {
@@ -1307,6 +1434,19 @@ export function useTifoController() {
   }
 
   async function saveVoiceNoteBlob({ blob, durationMs, mimeType }) {
+    const roomCode = activeRoomCode()
+    if (!roomCode) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceError: 'Open a chat before sending a voice note',
+          voiceStatus: 'error'
+        }
+      }))
+      return
+    }
+
     const replyTo = stateRef.current.chatReply
 
     if (blob.size < 1) {
@@ -1358,6 +1498,7 @@ export function useTifoController() {
       mediaRef,
       mimeType,
       replyTo,
+      roomCode,
       size: blob.size
     })
 
@@ -1374,6 +1515,19 @@ export function useTifoController() {
   }
 
   async function startVoiceNoteRecording() {
+    if (!activeRoomCode()) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          voiceElapsedMs: 0,
+          voiceError: 'Open a chat before recording a voice note',
+          voiceStatus: 'error'
+        }
+      }))
+      return
+    }
+
     if (!recordingSupported()) {
       setAppState((state) => ({
         ...state,
@@ -1452,7 +1606,7 @@ export function useTifoController() {
         })
       })
 
-      recorder.start()
+      recorder.start(250)
       setAppState((state) => ({
         ...state,
         chatMedia: {
@@ -1516,7 +1670,12 @@ export function useTifoController() {
 
     if (options.discard) {
       discardActiveVoiceRef.current = true
-      if (recorder.state !== 'inactive') recorder.stop()
+      if (recorder.state !== 'inactive') {
+        try {
+          recorder.requestData?.()
+        } catch {}
+        recorder.stop()
+      }
       return
     }
 
@@ -1531,7 +1690,12 @@ export function useTifoController() {
           voiceStatus: 'error'
         }
       }))
-      if (recorder.state !== 'inactive') recorder.stop()
+      if (recorder.state !== 'inactive') {
+        try {
+          recorder.requestData?.()
+        } catch {}
+        recorder.stop()
+      }
       return
     }
 
@@ -1544,11 +1708,28 @@ export function useTifoController() {
         voiceStatus: 'saving'
       }
     }))
-    if (recorder.state !== 'inactive') recorder.stop()
+    if (recorder.state !== 'inactive') {
+      try {
+        recorder.requestData?.()
+      } catch {}
+      recorder.stop()
+    }
   }
 
   async function saveChatImage(file, caption = '') {
     if (stateRef.current.chatMedia.imageStatus === 'saving') return
+    const roomCode = activeRoomCode()
+    if (!roomCode) {
+      setAppState((state) => ({
+        ...state,
+        chatMedia: {
+          ...state.chatMedia,
+          imageError: 'Open a chat before sending an image',
+          imageStatus: 'error'
+        }
+      }))
+      return
+    }
     const replyTo = stateRef.current.chatReply
 
     if (!imageFileSupported(file)) {
@@ -1590,6 +1771,7 @@ export function useTifoController() {
     let objectUrl = ''
     try {
       objectUrl = URL.createObjectURL(file)
+      const localPath = localPathForFile(file)
       setAppState((state) => ({
         ...state,
         chatMedia: {
@@ -1599,16 +1781,17 @@ export function useTifoController() {
         }
       }))
 
-      const [mediaRef, dimensions] = await Promise.all([
+      const [mediaRef, dimensions, bytesBase64] = await Promise.all([
         mediaRefForFile(file, 'image'),
-        readImageDimensions(objectUrl)
+        readImageDimensions(objectUrl),
+        localPath ? Promise.resolve('') : blobToBase64(file)
       ])
       const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-      const localPath = localPathForFile(file)
 
       pendingChatMediaPreviewsRef.current.set(clientId, { url: objectUrl })
 
       sendWorkerCommand('chat-media:save', {
+        bytesBase64,
         caption: caption.trim().slice(0, 140),
         clientId,
         height: dimensions?.height || null,
@@ -1617,6 +1800,7 @@ export function useTifoController() {
         mediaRef,
         mimeType: imageMimeType(file),
         replyTo,
+        roomCode,
         size: file.size,
         width: dimensions?.width || null
       })
@@ -1646,6 +1830,18 @@ export function useTifoController() {
 
   async function saveClipMetadata(file) {
     if (stateRef.current.clipDraft.status === 'saving') return
+    const roomCode = activeRoomCode()
+    if (!roomCode) {
+      setAppState((state) => ({
+        ...state,
+        clipDraft: {
+          ...state.clipDraft,
+          error: 'Open a match room before sending a clip',
+          status: 'error'
+        }
+      }))
+      return
+    }
 
     if (!clipFileSupported(file)) {
       setAppState((state) => ({
@@ -1743,6 +1939,7 @@ export function useTifoController() {
         lastModified: file.lastModified || null,
         localPath,
         mimeType: clipMimeType(file),
+        roomCode,
         size: file.size,
         title: 'Highlight clip'
       })
@@ -2212,6 +2409,12 @@ export function useTifoController() {
     const cachedEvents = loadCachedRoomEvents(targetRoomCode)
 
     if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom, { touch: false })
+    setRoomPending(targetRoomCode)
+    clearClipPreviewUrls()
+    clearChatMediaUrls()
+    chantPrefetchIdsRef.current.clear()
+    chatMediaPrefetchIdsRef.current.clear()
+    clipPrefetchIdsRef.current.clear()
 
     setAppState((state) => ({
       ...state,
@@ -2250,7 +2453,7 @@ export function useTifoController() {
       effects: [],
       lastError: ''
     }))
-    markCurrentRoomRead(targetRoomCode)
+    markCurrentRoomRead(targetRoomCode, { announce: false })
 
     sendWorkerCommand('profile:set', { profile })
     sendWorkerCommand('room:join', {
@@ -2268,14 +2471,22 @@ export function useTifoController() {
   function sendChat(text) {
     const clean = text.trim()
     if (!clean) return
+    const roomCode = activeRoomCode()
+    if (!roomCode) {
+      setAppState((state) => ({
+        ...state,
+        lastError: 'Open a chat before sending a message'
+      }))
+      return
+    }
     const replyTo = stateRef.current.chatReply
     setAppState((state) => ({
       ...state,
       chatDraft: '',
       chatReply: null
     }))
-    sendWorkerCommand('typing:stop')
-    sendWorkerCommand('chat:send', { replyTo, text: clean })
+    sendWorkerCommand('typing:stop', { roomCode })
+    sendWorkerCommand('chat:send', { replyTo, roomCode, text: clean })
   }
 
   function startChatReply(event) {
@@ -2296,23 +2507,28 @@ export function useTifoController() {
 
   function editChatMessage(targetId, text) {
     const clean = text.trim()
-    if (!targetId || !clean) return
+    const roomCode = activeRoomCode()
+    if (!targetId || !clean || !roomCode) return
     sendWorkerCommand('chat:edit', {
+      roomCode,
       targetId,
       text: clean
     })
   }
 
   function deleteChatEvent(targetId) {
-    if (!targetId) return
-    sendWorkerCommand('chat:delete', { targetId })
+    const roomCode = activeRoomCode()
+    if (!targetId || !roomCode) return
+    sendWorkerCommand('chat:delete', { roomCode, targetId })
   }
 
   function reactToChatEvent(targetId, emoji) {
     const cleanEmoji = String(emoji || '').trim()
-    if (!targetId || !cleanEmoji) return
+    const roomCode = activeRoomCode()
+    if (!targetId || !cleanEmoji || !roomCode) return
     sendWorkerCommand('chat:react', {
       emoji: cleanEmoji,
+      roomCode,
       targetId
     })
   }
@@ -2323,11 +2539,12 @@ export function useTifoController() {
       chatDraft: value
     }))
     const now = Date.now()
-    if (value.trim() && stateRef.current.view === 'room' && now - typingSentAtRef.current > 1800) {
+    const roomCode = activeRoomCode()
+    if (value.trim() && roomCode && now - typingSentAtRef.current > 1800) {
       typingSentAtRef.current = now
-      sendWorkerCommand('typing:start')
-    } else if (!value.trim() && stateRef.current.view === 'room') {
-      sendWorkerCommand('typing:stop')
+      sendWorkerCommand('typing:start', { roomCode })
+    } else if (!value.trim() && roomCode) {
+      sendWorkerCommand('typing:stop', { roomCode })
     }
   }
 
@@ -2371,15 +2588,20 @@ export function useTifoController() {
   function sendReaction(reactionType) {
     const reaction = reactionTypes.find((item) => item.type === reactionType)
     if (!reaction) return
+    const roomCode = activeRoomCode()
+    if (!roomCode) return
     sendWorkerCommand('reaction:send', {
       reactionType: reaction.type,
+      roomCode,
       label: reaction.label
     })
   }
 
   function replayFrom(anchorId = '') {
+    const roomCode = activeRoomCode()
+    if (!roomCode) return
     startReplayEcho(anchorId)
-    sendWorkerCommand('echo:replay')
+    sendWorkerCommand('echo:replay', { roomCode })
   }
 
   useEffect(() => {

@@ -488,6 +488,7 @@ function createTifoRoomState(options = {}) {
 
   async function handleChantSave(command) {
     if (!requireRoom(command.type)) return
+    const roomCode = state.room.code
 
     const clientId = requireString(command.type, command.clientId, 'clientId')
     const mimeType = requireString(command.type, command.mimeType, 'mimeType')
@@ -505,15 +506,17 @@ function createTifoRoomState(options = {}) {
       clientId: clientId.slice(0, 80),
       durationMs: Math.round(durationMs),
       mimeType: mimeType.slice(0, 80),
-      roomCode: state.room.code
+      roomCode
     })
 
+    if (state.room?.code !== roomCode) return
     if (!payload) return
     addEvent('chant', payload)
   }
 
   async function handleChatMediaSave(command) {
     if (!requireRoom(command.type)) return
+    const roomCode = state.room.code
 
     const payload = sanitizeChatMediaPayload(command)
     if (!payload) {
@@ -530,15 +533,17 @@ function createTifoRoomState(options = {}) {
           ? command.bytesBase64.trim()
           : '',
       localPath: typeof command.localPath === 'string' ? command.localPath.trim() : '',
-      roomCode: state.room.code
+      roomCode
     })
 
+    if (state.room?.code !== roomCode) return
     if (!savedPayload) return
     addEvent('chat-media', savedPayload)
   }
 
   async function handleClipSave(command) {
     if (!requireRoom(command.type)) return
+    const roomCode = state.room.code
 
     const payload = sanitizeClipPayload(command)
     if (!payload) {
@@ -549,9 +554,10 @@ function createTifoRoomState(options = {}) {
     const savedPayload = await onClipSave({
       ...payload,
       localPath: typeof command.localPath === 'string' ? command.localPath.trim() : '',
-      roomCode: state.room.code
+      roomCode
     })
 
+    if (state.room?.code !== roomCode) return
     if (!savedPayload) return
     addEvent('clip', savedPayload)
   }
@@ -840,7 +846,7 @@ function createTifoRoomState(options = {}) {
 
     if ((added.length > 0 || changed) && opts.notify !== false) {
       state.events = sortedEvents()
-      send('event:list', { events: state.events })
+      send('event:list', { events: state.events, room: state.room?.code || '' })
     } else if (added.length > 0 || changed) {
       state.events = sortedEvents()
     }

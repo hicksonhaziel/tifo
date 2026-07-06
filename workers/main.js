@@ -84,7 +84,28 @@ const echoTimeline = new TifoEchoTimeline(store)
 const legacyEventLog = new TifoEventLog(store)
 const pendingSyncEventIds = new Set()
 const inflightSyncEventIds = new Set()
+const queuedRoomCommands = []
+const queuedRoomCommandTtlMs = 6000
+const roomScopedCommandTypes = new Set([
+  'chat:send',
+  'chat:edit',
+  'chat:delete',
+  'chat:react',
+  'reaction:send',
+  'chant:save',
+  'chat-media:save',
+  'clip:save',
+  'echo:replay',
+  'chant:load',
+  'chat-media:load',
+  'clip:load',
+  'typing:start',
+  'typing:stop',
+  'room:read'
+])
 let simulatedOffline = false
+let joiningRoomCode = ''
+let roomJoinSequence = 0
 let lastPendingFlushCount = 0
 let lastSyncAt = null
 
@@ -822,6 +843,13 @@ function broadcastConversationMessage(message, exceptPeerId = null) {
 }
 
 function handleTypingCommand(command) {
+  if (!roomState.state.room?.code) return
+  if (
+    command.roomCode &&
+    cleanCommandRoomCode(command.roomCode) !== cleanCommandRoomCode(roomState.state.room.code)
+  ) {
+    return
+  }
   const message = conversations.typingMessage(
     roomState.state.room,
     roomState.state.profile,
@@ -831,9 +859,134 @@ function handleTypingCommand(command) {
 }
 
 function handleRoomRead(command) {
+  if (!roomState.state.room?.code) return
+  if (
+    command.roomCode &&
+    cleanCommandRoomCode(command.roomCode) !== cleanCommandRoomCode(roomState.state.room.code)
+  ) {
+    return
+  }
   const readAt = Number.isFinite(command.readAt) ? command.readAt : Date.now()
   const message = conversations.readMessage(roomState.state.room, roomState.state.profile, readAt)
   broadcastConversationMessage(message)
+}
+
+function cleanCommandRoomCode(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+}
+
+function isRoomScopedCommand(command) {
+  return roomScopedCommandTypes.has(command?.type)
+}
+
+function pruneQueuedRoomCommands(now = Date.now()) {
+  for (let index = queuedRoomCommands.length - 1; index >= 0; index -= 1) {
+    if (now - queuedRoomCommands[index].queuedAt > queuedRoomCommandTtlMs) {
+      queuedRoomCommands.splice(index, 1)
+    }
+  }
+}
+
+function queueRoomCommand(command, roomCode) {
+  pruneQueuedRoomCommands()
+  queuedRoomCommands.push({
+    command,
+    queuedAt: Date.now(),
+    roomCode
+  })
+  if (queuedRoomCommands.length > 80) queuedRoomCommands.splice(0, queuedRoomCommands.length - 80)
+}
+
+function shouldDeferRoomCommand(command) {
+  if (!isRoomScopedCommand(command)) return false
+
+  const targetRoomCode = cleanCommandRoomCode(command.roomCode)
+  if (!targetRoomCode) return false
+
+  const activeRoomCode = cleanCommandRoomCode(roomState.state.room?.code)
+  if (activeRoomCode === targetRoomCode) return false
+
+  if (!activeRoomCode || joiningRoomCode === targetRoomCode) {
+    queueRoomCommand(command, targetRoomCode)
+  }
+
+  return true
+}
+
+async function drainQueuedRoomCommands(roomCode) {
+  const targetRoomCode = cleanCommandRoomCode(roomCode)
+  if (!targetRoomCode) return
+
+  pruneQueuedRoomCommands()
+  const ready = []
+  for (let index = queuedRoomCommands.length - 1; index >= 0; index -= 1) {
+    if (queuedRoomCommands[index].roomCode !== targetRoomCode) continue
+    ready.unshift(queuedRoomCommands[index].command)
+    queuedRoomCommands.splice(index, 1)
+  }
+
+  for (const command of ready) await handleRoomScopedCommand(command)
+}
+
+async function handleRoomScopedCommand(command) {
+  if (command.type === 'typing:start' || command.type === 'typing:stop') {
+    handleTypingCommand(command)
+    return
+  }
+
+  if (command.type === 'room:read') {
+    handleRoomRead(command)
+    return
+  }
+
+  if (command.type === 'chant:load') {
+    await handleChantLoad(command)
+    return
+  }
+
+  if (command.type === 'chat-media:load') {
+    await handleChatMediaLoad(command)
+    return
+  }
+
+  if (command.type === 'clip:load') {
+    await handleClipLoad(command)
+    return
+  }
+
+  await roomState.handleCommand(command)
+}
+
+async function handleRoomJoinCommand(command) {
+  const joinSequence = ++roomJoinSequence
+  const targetRoomCode = cleanCommandRoomCode(command.room?.code || command.roomCode)
+  joiningRoomCode = targetRoomCode
+
+  try {
+    const profile = await ensureWorkerProfile(command.profile || roomState.state.profile)
+    if (joinSequence !== roomJoinSequence) return
+
+    await mailbox.setProfile(profile)
+    if (joinSequence !== roomJoinSequence) return
+
+    await roomState.handleCommand({ ...command, profile })
+    if (joinSequence !== roomJoinSequence) return
+
+    joiningRoomCode = ''
+    sendKnownContacts('room joined')
+    broadcastAppIdentity()
+    broadcastMailboxWant()
+    sendSyncDiagnostics('room joined')
+    await drainQueuedRoomCommands(roomState.state.room?.code)
+  } catch (err) {
+    if (joinSequence === roomJoinSequence) {
+      joiningRoomCode = ''
+      queuedRoomCommands.length = 0
+    }
+    throw err
+  }
 }
 
 async function migrateLegacyRoomEvents(room, storedEvents) {
@@ -892,6 +1045,7 @@ async function handleChantSave(command) {
 }
 
 async function handleChatMediaSave(command) {
+  const room = roomState.state.room
   const kind = command.kind === 'image' ? 'image' : command.kind === 'voice' ? 'voice' : null
   if (!kind) {
     send('error', {
@@ -989,7 +1143,7 @@ async function handleChatMediaSave(command) {
   }
   if (command.replyTo && typeof command.replyTo === 'object') savedPayload.replyTo = command.replyTo
 
-  await relayMailboxChatMedia(savedPayload, data).catch(() => {})
+  relayMailboxChatMedia(room, savedPayload, data).catch(() => {})
   return savedPayload
 }
 
@@ -1813,8 +1967,7 @@ async function relayMailboxEvent(event) {
   if (envelope) broadcastMailboxEnvelope(envelope)
 }
 
-async function relayMailboxChatMedia(payload, data) {
-  const room = roomState.state.room
+async function relayMailboxChatMedia(room, payload, data) {
   if (!room || !payload || !data?.byteLength) return
 
   const envelope = await mailbox.createChatMediaEnvelope(room, payload, data)
@@ -1845,7 +1998,32 @@ async function cacheMailboxChatMedia(record) {
 
   await fs.mkdir(chatMediaRoomDir(room.code), { recursive: true })
   await fs.writeFile(chatMediaFilePath(room.code, mediaRef, kind, mimeType), data)
-  return true
+  return {
+    data,
+    kind,
+    mediaRef,
+    mimeType,
+    size: data.byteLength
+  }
+}
+
+function notifyCachedMailboxChatMedia(record, cached) {
+  if (!cached || roomState.state.room?.code !== record.room?.code) return
+
+  for (const event of roomState.state.events) {
+    if (event.type !== 'chat-media') continue
+    if (event.payload?.kind !== cached.kind) continue
+    if (safeFilePart(event.payload?.mediaRef || '') !== cached.mediaRef) continue
+
+    sendLoadedChatMedia({
+      data: cached.data,
+      eventId: event.id,
+      kind: cached.kind,
+      mediaRef: cached.mediaRef,
+      mimeType: cached.mimeType,
+      size: cached.size
+    })
+  }
 }
 
 async function restoreMailboxChatMedia({ kind, mediaRef, mimeType, room }) {
@@ -1861,8 +2039,7 @@ async function restoreMailboxChatMedia({ kind, mediaRef, mimeType, room }) {
 
     const cached = await cacheMailboxChatMedia(record).catch(() => false)
     if (!cached) continue
-    const { data } = await loadLocalChatMedia(room.code, mediaRef, kind, mimeType)
-    return data
+    return cached.data
   }
 
   return null
@@ -1872,7 +2049,8 @@ async function processMailboxRecord(record) {
   if (!record?.payload || !record.room) return
 
   if (record.payload.kind === 'chat-media') {
-    await cacheMailboxChatMedia(record).catch(() => false)
+    const cached = await cacheMailboxChatMedia(record).catch(() => false)
+    notifyCachedMailboxChatMedia(record, cached)
     return
   }
 
@@ -2302,11 +2480,68 @@ goodbye(async () => {
   await store.close()
 })
 
-pipe.on('data', async (data) => {
+async function handleRendererCommand(command) {
+  try {
+    if (command.type === 'profile:set') {
+      await handleProfileSet(command)
+      return
+    }
+
+    if (command.type === 'mailbox:known') {
+      await handleMailboxKnown(command)
+      return
+    }
+
+    if (command.type === 'offline:set') {
+      await setSimulatedOffline(command.enabled)
+      return
+    }
+
+    if (command.type === 'sync:diagnostics') {
+      sendSyncDiagnostics('manual diagnostics')
+      return
+    }
+
+    if (command.type === 'sync:request' || command.type === 'sync:recover') {
+      await requestSyncNow(command.type === 'sync:recover' ? 'manual recovery' : 'manual sync')
+      return
+    }
+
+    if (command.type === 'room:join') {
+      await handleRoomJoinCommand(command)
+      return
+    }
+
+    if (shouldDeferRoomCommand(command)) {
+      return
+    }
+
+    if (isRoomScopedCommand(command)) {
+      await handleRoomScopedCommand(command)
+      return
+    }
+
+    await roomState.handleCommand(command)
+  } catch (err) {
+    send('error', {
+      command: command.type,
+      message: err.message || 'Worker command failed'
+    })
+  }
+}
+
+pipe.on('data', (data) => {
   const message = data.toString()
   if (message === 'pear:applyUpdate') {
-    await pear.updater.applyUpdate()
-    pipe.write('pear:updateApplied')
+    pear.updater
+      .applyUpdate()
+      .then(() => pipe.write('pear:updateApplied'))
+      .catch((err) => {
+        send('error', {
+          command: 'pear:applyUpdate',
+          message: err.message || 'Could not apply update'
+        })
+      })
     return
   }
 
@@ -2334,75 +2569,12 @@ pipe.on('data', async (data) => {
     return
   }
 
-  try {
-    if (command.type === 'profile:set') {
-      await handleProfileSet(command)
-      return
-    }
-
-    if (command.type === 'mailbox:known') {
-      await handleMailboxKnown(command)
-      return
-    }
-
-    if (command.type === 'offline:set') {
-      await setSimulatedOffline(command.enabled)
-      return
-    }
-
-    if (command.type === 'typing:start' || command.type === 'typing:stop') {
-      handleTypingCommand(command)
-      return
-    }
-
-    if (command.type === 'room:read') {
-      handleRoomRead(command)
-      return
-    }
-
-    if (command.type === 'sync:diagnostics') {
-      sendSyncDiagnostics('manual diagnostics')
-      return
-    }
-
-    if (command.type === 'sync:request' || command.type === 'sync:recover') {
-      await requestSyncNow(command.type === 'sync:recover' ? 'manual recovery' : 'manual sync')
-      return
-    }
-
-    if (command.type === 'chant:load') {
-      await handleChantLoad(command)
-      return
-    }
-
-    if (command.type === 'chat-media:load') {
-      await handleChatMediaLoad(command)
-      return
-    }
-
-    if (command.type === 'clip:load') {
-      await handleClipLoad(command)
-      return
-    }
-
-    if (command.type === 'room:join') {
-      const profile = await ensureWorkerProfile(command.profile || roomState.state.profile)
-      await mailbox.setProfile(profile)
-      await roomState.handleCommand({ ...command, profile })
-      sendKnownContacts('room joined')
-      broadcastAppIdentity()
-      broadcastMailboxWant()
-      sendSyncDiagnostics('room joined')
-      return
-    }
-
-    await roomState.handleCommand(command)
-  } catch (err) {
+  handleRendererCommand(command).catch((err) => {
     send('error', {
       command: command.type,
       message: err.message || 'Worker command failed'
     })
-  }
+  })
 })
 
 send('app:ready', {
