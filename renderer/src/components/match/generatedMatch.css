@@ -56,6 +56,11 @@
 }
 
 .tifo-generated-match .match-rail {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg-1);
   border-left: 1px solid rgba(255, 255, 255, 0.035);
 }
@@ -69,6 +74,10 @@
 .tifo-generated-match .match-rail > .rail-tabs,
 .tifo-generated-match .match-rail .rail-tabs {
   margin: 14px 14px 10px;
+}
+
+.tifo-generated-match .match-rail-tabs {
+  flex-shrink: 0;
 }
 
 .tifo-generated-match .match-rail .rail-tab {

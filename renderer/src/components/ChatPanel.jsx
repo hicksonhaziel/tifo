@@ -62,6 +62,7 @@ export function ChatPanel({
   const [emojiTargetId, setEmojiTargetId] = useState('')
   const [trayOpen, setTrayOpen] = useState(false)
   const [trayTab, setTrayTab] = useState(composerMode === 'match' ? 'flares' : 'media')
+  const [quickChantsHidden, setQuickChantsHidden] = useState(false)
   const [editingId, setEditingId] = useState('')
   const [editDraft, setEditDraft] = useState('')
   const voiceRecording = state.chatMedia.voiceStatus === 'recording'
@@ -71,6 +72,10 @@ export function ChatPanel({
   const generated = variant === 'generated'
   const hasDraft = state.chatDraft.trim().length > 0
   const matchComposer = composerMode === 'match'
+
+  useEffect(() => {
+    setQuickChantsHidden(false)
+  }, [composerMode, state.roomCode])
 
   useEffect(() => {
     const picker = emojiPickerRef.current
@@ -206,8 +211,11 @@ export function ChatPanel({
                 reply={state.chatReply}
               />
             ) : null}
-            {matchComposer && !trayOpen && !voiceRecording ? (
-              <QuickChants onSelect={insertQuickChant} />
+            {matchComposer && !quickChantsHidden && !trayOpen && !voiceRecording ? (
+              <QuickChants
+                onDismiss={() => setQuickChantsHidden(true)}
+                onSelect={insertQuickChant}
+              />
             ) : null}
             <form className='composer-capsule' onSubmit={submitChat}>
               <input
@@ -471,20 +479,30 @@ const quickChants = [
   { emoji: '💚', text: 'come on lads' }
 ]
 
-function QuickChants({ onSelect }) {
+function QuickChants({ onDismiss, onSelect }) {
   return (
     <div className='quick-chants'>
-      {quickChants.map((chant) => (
-        <button
-          className='quick-chant'
-          key={chant.text}
-          onClick={() => onSelect(chant)}
-          type='button'
-        >
-          <span className='emo'>{chant.emoji}</span>
-          {chant.text}
-        </button>
-      ))}
+      <div className='quick-chants-list'>
+        {quickChants.map((chant) => (
+          <button
+            className='quick-chant'
+            key={chant.text}
+            onClick={() => onSelect(chant)}
+            type='button'
+          >
+            <span className='emo'>{chant.emoji}</span>
+            {chant.text}
+          </button>
+        ))}
+      </div>
+      <button
+        className='quick-chants-dismiss'
+        onClick={onDismiss}
+        title='Hide suggestions'
+        type='button'
+      >
+        <X size={12} strokeWidth={2.6} />
+      </button>
     </div>
   )
 }
@@ -1221,7 +1239,7 @@ function ChatReactionBar({ actions, event, onReact, reactions }) {
           title='Add reaction'
           onClick={() => onReact(event.id)}
         >
-          <SmilePlus size={13} strokeWidth={2.4} />
+          <SmilePlus size={15} strokeWidth={2.4} />
         </button>
       ) : null}
     </div>

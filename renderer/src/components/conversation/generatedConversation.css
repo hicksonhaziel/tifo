@@ -505,9 +505,11 @@
 
 .tifo-generated-conversation .conversation-chat {
   flex: 1;
-  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .tifo-generated-conversation .conversation-scroll {
@@ -806,9 +808,9 @@
 }
 
 .tifo-generated-conversation .chat-reaction-row {
-  margin-top: 6px;
+  margin-top: 7px;
   display: inline-flex;
-  gap: 4px;
+  gap: 5px;
   flex-wrap: wrap;
   justify-content: flex-start;
 }
@@ -821,15 +823,16 @@
 .tifo-generated-conversation .chat-reaction-add {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  min-height: 0;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 10px;
+  min-height: 30px;
   border-radius: 999px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   color: var(--ink-1);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -840,7 +843,7 @@
 }
 
 .tifo-generated-conversation .chat-reaction-pill span {
-  font-size: 13px;
+  font-size: 18px;
   line-height: 1;
 }
 
@@ -936,6 +939,7 @@
 }
 
 .tifo-generated-conversation .composer {
+  flex-shrink: 0;
   border-top: 1px solid var(--line-1);
   background: linear-gradient(180deg, transparent, rgba(20, 23, 26, 0.85) 30%);
   padding: 10px 16px 14px;
@@ -945,13 +949,21 @@
 
 .tifo-generated-conversation .quick-chants {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 0 2px 8px;
+}
+
+.tifo-generated-conversation .quick-chants-list {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.tifo-generated-conversation .quick-chants::-webkit-scrollbar {
+.tifo-generated-conversation .quick-chants-list::-webkit-scrollbar {
   display: none;
 }
 
@@ -985,7 +997,29 @@
   font-size: 13px;
 }
 
+.tifo-generated-conversation .quick-chants-dismiss {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.tifo-generated-conversation .quick-chants-dismiss:hover {
+  border-color: rgba(111, 168, 144, 0.35);
+  background: var(--bg-3);
+  color: var(--ink-0);
+}
+
 .tifo-generated-conversation .composer-wrap {
+  flex-shrink: 0;
+  min-width: 0;
   max-width: 820px;
   margin: 0 auto;
   width: 100%;

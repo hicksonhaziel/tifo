@@ -558,10 +558,6 @@ export function useTifoController() {
     }, 2200)
   }
 
-  function applyLiveEffects(events) {
-    for (const event of events) triggerReactionEffect(event)
-  }
-
   function upsertEvent(event) {
     attachPendingChantUrl(event)
     attachPendingChatMediaPreview(event)
@@ -640,7 +636,10 @@ export function useTifoController() {
           }))
         }
         break
-      case 'room:joined':
+      case 'room:joined': {
+        const joinedEvents = message.events || []
+        seenEffectEventIdsRef.current.clear()
+        rememberEffectEvents(joinedEvents)
         setAppState((state) => ({
           ...state,
           view: 'room',
@@ -652,7 +651,7 @@ export function useTifoController() {
           roomTitle: message.room.title,
           peerCount: message.peerCount,
           syncStatus: message.syncStatus,
-          events: message.events || [],
+          events: joinedEvents,
           chatDraft: '',
           chatReply: null,
           typingUsers: [],
@@ -680,16 +679,15 @@ export function useTifoController() {
           effects: [],
           lastError: ''
         }))
-        seenEffectEventIdsRef.current.clear()
         chantPrefetchIdsRef.current.clear()
         chatMediaPrefetchIdsRef.current.clear()
         clipPrefetchIdsRef.current.clear()
-        rememberEffectEvents(message.events || [])
-        prefetchChantAudios(message.events || [])
-        prefetchChatMediaEvents(message.events || [])
-        prefetchClipVideos(message.events || [])
+        prefetchChantAudios(joinedEvents)
+        prefetchChatMediaEvents(joinedEvents)
+        prefetchClipVideos(joinedEvents)
         markCurrentRoomRead(message.room.code)
         break
+      }
       case 'room:left':
         setAppState((state) => ({
           ...state,
@@ -796,7 +794,7 @@ export function useTifoController() {
           attachPendingChatMediaPreview(event)
           attachPendingClipPreview(event)
         }
-        applyLiveEffects(events)
+        rememberEffectEvents(events)
         setAppState((state) => ({
           ...state,
           events
