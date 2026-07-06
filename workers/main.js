@@ -908,10 +908,7 @@ function shouldDeferRoomCommand(command) {
   const activeRoomCode = cleanCommandRoomCode(roomState.state.room?.code)
   if (activeRoomCode === targetRoomCode) return false
 
-  if (!activeRoomCode || joiningRoomCode === targetRoomCode) {
-    queueRoomCommand(command, targetRoomCode)
-  }
-
+  queueRoomCommand(command, targetRoomCode)
   return true
 }
 
@@ -2089,6 +2086,7 @@ function announceMailboxConversation(room, event = null) {
   send('mailbox:conversation', {
     event,
     room: {
+      avatarDataUrl: room.avatarDataUrl || '',
       code: room.code,
       invite: room.invite || '',
       kind: room.kind,

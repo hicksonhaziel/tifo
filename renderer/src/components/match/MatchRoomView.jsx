@@ -27,7 +27,6 @@ import {
   formatTime
 } from '../../tifo/format.js'
 import { profileLabel, profileName } from '../../tifo/identity.js'
-import { availableRooms } from '../../tifo/rooms.js'
 import { ChatPanel } from '../ChatPanel.jsx'
 import { InviteModal } from '../conversation/InviteModal.jsx'
 import { ReactionEffects } from '../ReactionEffects.jsx'
@@ -45,8 +44,8 @@ export function MatchRoomView({ controller }) {
   const [railTab, setRailTab] = useState('highlights')
   const metrics = derived.metrics
   const roomFixture = useMemo(
-    () => availableRooms.find((room) => room.code === state.roomCode) || null,
-    [state.roomCode]
+    () => (state.matchRooms || []).find((room) => room.code === state.roomCode) || null,
+    [state.matchRooms, state.roomCode]
   )
   const match = roomFixture
     ? {

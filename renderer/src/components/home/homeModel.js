@@ -90,7 +90,7 @@ export function recentChatRows(state) {
 
     return {
       accent: isDm ? '#B87A70' : '#7FA6D1',
-      avatar: isDm ? profileAvatarUrl(dmProfile, `${title}-dm`) : '',
+      avatar: isDm ? profileAvatarUrl(dmProfile, `${title}-dm`) : room.avatarDataUrl || '',
       key: room.code,
       last: unread > 0 ? `${unread} unread` : roomInviteLabel(room),
       room,

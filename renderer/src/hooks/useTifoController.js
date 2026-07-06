@@ -67,13 +67,14 @@ import {
   createDmInvite,
   createDmInviteForPeer,
   createPrivateGroupInvite,
+  deleteRecentPrivateRoom,
   encodeInvite,
   inviteToRoom,
   loadRecentPrivateRooms,
   parseInvite,
   saveRecentPrivateRoom
 } from '../tifo/invites.js'
-import { availableRooms } from '../tifo/rooms.js'
+import { createMatchRoom, deleteMatchRoom, loadMatchRooms, saveMatchRoom } from '../tifo/rooms.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
@@ -225,6 +226,7 @@ export function useTifoController() {
   const [appState, setReactState] = useState(() => {
     const profile = loadLocalProfile()
     const initialState = createInitialState({
+      matchRooms: loadMatchRooms(),
       profile,
       recentPrivateRooms: loadRecentPrivateRooms(profile)
     })
@@ -327,13 +329,15 @@ export function useTifoController() {
   }
 
   function knownMailboxRooms(state = stateRef.current) {
-    const publicRooms = availableRooms.map((room) => ({
+    const publicRooms = (state.matchRooms || []).map((room) => ({
+      avatarDataUrl: room.avatarDataUrl || '',
       code: room.code,
       kind: 'match',
       title: room.title
     }))
 
     const privateRooms = (state.recentPrivateRooms || []).map((room) => ({
+      avatarDataUrl: room.avatarDataUrl || '',
       code: room.code,
       invite: room.invite || '',
       kind: room.kind,
@@ -378,9 +382,11 @@ export function useTifoController() {
     const nextProfile = withLocalProfileAvatar(profile)
     saveLocalProfile(nextProfile)
     const recentPrivateRooms = loadRecentPrivateRooms(nextProfile)
+    const matchRooms = loadMatchRooms()
     setAppState((state) => ({
       ...state,
       lastError: '',
+      matchRooms,
       nickname: profileName(nextProfile),
       profile: nextProfile,
       knownProfiles: mergeKnownProfiles(state.knownProfiles, [nextProfile]),
@@ -952,6 +958,7 @@ export function useTifoController() {
             ]),
             nickname: profileName(joinedProfile),
             roomCode: message.room.code,
+            roomAvatarDataUrl: message.room.avatarDataUrl || state.roomAvatarDataUrl || '',
             roomInvite: message.room.invite || '',
             roomKind: message.room.kind || 'match',
             roomTitle: message.room.title,
@@ -1001,6 +1008,7 @@ export function useTifoController() {
         setAppState((state) => ({
           ...state,
           view: state.profile ? 'home' : 'welcome',
+          roomAvatarDataUrl: '',
           roomInvite: '',
           roomKind: 'match',
           roomTitle: '',
@@ -2260,11 +2268,13 @@ export function useTifoController() {
   function createProfile(input) {
     try {
       const profile = createLocalProfile(input)
+      const matchRooms = loadMatchRooms()
       const recentPrivateRooms = loadRecentPrivateRooms(profile)
       saveLocalProfile(profile)
       setAppState((state) => ({
         ...state,
         lastError: '',
+        matchRooms,
         nickname: profileName(profile),
         profile,
         knownProfiles: mergeKnownProfiles(state.knownProfiles, [profile]),
@@ -2305,6 +2315,7 @@ export function useTifoController() {
     if (!profile) return null
 
     const invite = createPrivateGroupInvite({
+      avatarDataUrl: input.avatarDataUrl,
       profile,
       title: input.title
     })
@@ -2327,7 +2338,6 @@ export function useTifoController() {
     if (!profile) return null
 
     const invite = createDmInvite({
-      handle: input.handle,
       profile
     })
     const inviteLink = encodeInvite(invite)
@@ -2342,6 +2352,55 @@ export function useTifoController() {
       inviteLink,
       room
     }
+  }
+
+  function createMatchRoomFromInput(input = {}) {
+    try {
+      const room = createMatchRoom(input, stateRef.current.matchRooms)
+      const matchRooms = saveMatchRoom(room)
+      setAppState((state) => ({
+        ...state,
+        lastError: '',
+        matchRooms
+      }))
+      syncWorkerMailbox({
+        ...stateRef.current,
+        matchRooms
+      })
+      return room
+    } catch (err) {
+      setAppState((state) => ({
+        ...state,
+        lastError: err.message || 'Could not create match room'
+      }))
+      return null
+    }
+  }
+
+  function deleteMatchRoomByCode(roomCode) {
+    const matchRooms = deleteMatchRoom(roomCode)
+    setAppState((state) => ({
+      ...state,
+      matchRooms
+    }))
+    syncWorkerMailbox({
+      ...stateRef.current,
+      matchRooms
+    })
+    if (stateRef.current.roomCode === roomCode) leaveRoom()
+  }
+
+  function deletePrivateRoom(roomCode) {
+    const recentPrivateRooms = deleteRecentPrivateRoom(roomCode, stateRef.current.profile)
+    setAppState((state) => ({
+      ...state,
+      recentPrivateRooms
+    }))
+    syncWorkerMailbox({
+      ...stateRef.current,
+      recentPrivateRooms
+    })
+    if (stateRef.current.roomCode === roomCode) leaveRoom()
   }
 
   async function openDmFromEvent(event) {
@@ -2404,7 +2463,7 @@ export function useTifoController() {
     const targetRoom = room || null
     const targetRoomCode = targetRoom?.code || roomCode
     if (!targetRoomCode) return
-    const publicRoom = availableRooms.find((item) => item.code === targetRoomCode)
+    const publicRoom = stateRef.current.matchRooms.find((item) => item.code === targetRoomCode)
     const roomTitle = targetRoom?.title || publicRoom?.title || targetRoomCode
     const cachedEvents = loadCachedRoomEvents(targetRoomCode)
 
@@ -2420,6 +2479,7 @@ export function useTifoController() {
       ...state,
       view: 'room',
       roomCode: targetRoomCode,
+      roomAvatarDataUrl: targetRoom?.avatarDataUrl || publicRoom?.avatarDataUrl || '',
       roomInvite: targetRoom?.invite || '',
       roomKind: targetRoom?.kind || 'match',
       roomTitle,
@@ -2658,10 +2718,13 @@ export function useTifoController() {
   return {
     actions: {
       createDmRoom,
+      createMatchRoom: createMatchRoomFromInput,
       createPrivateGroup,
       createProfile,
       cancelChatReply,
       deleteChatEvent,
+      deleteMatchRoom: deleteMatchRoomByCode,
+      deletePrivateRoom,
       editChatMessage,
       joinInvite,
       joinRoom,

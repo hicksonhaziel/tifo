@@ -1,3 +1,5 @@
+import { cleanAvatarDataUrl } from './identity.js'
+
 export const RECENT_PRIVATE_ROOMS_KEY = 'tifo:private-rooms:v1'
 const INVITE_PREFIX = 'tifo://room/'
 const MAX_RECENT_PRIVATE_ROOMS = 40
@@ -9,6 +11,7 @@ export function createPrivateGroupInvite(input = {}) {
   const topicKey = randomHex(32)
 
   return {
+    avatarDataUrl: cleanAvatarDataUrl(input.avatarDataUrl),
     code: `GRP-${roomId}`,
     createdAt: now,
     creator: cleanProfile(input.profile),
@@ -88,6 +91,7 @@ export function parseInvite(value) {
 export function inviteToRoom(invite, options = {}) {
   const clean = sanitizeInvite(invite)
   return {
+    avatarDataUrl: clean.avatarDataUrl,
     code: clean.code,
     invite: encodeInvite(clean),
     kind: clean.kind,
@@ -157,6 +161,14 @@ export function saveRecentPrivateRoom(room, profile = null) {
   return next
 }
 
+export function deleteRecentPrivateRoom(roomCode, profile = null) {
+  const cleanRoomCode = cleanCode(roomCode)
+  if (!cleanRoomCode) return loadRecentPrivateRooms(profile)
+  const next = loadRecentPrivateRooms(profile).filter((room) => room.code !== cleanRoomCode)
+  window.localStorage.setItem(RECENT_PRIVATE_ROOMS_KEY, JSON.stringify(next))
+  return next
+}
+
 export function roomInviteLabel(room) {
   if (room?.kind === 'dm') return 'Direct message'
   if (room?.kind === 'group' || room?.kind === 'private') return 'Private group'
@@ -177,6 +189,7 @@ function sanitizeInvite(invite) {
       : cleanTitle(invite.title) || 'Private group'
 
   return {
+    avatarDataUrl: kind === 'group' ? cleanAvatarDataUrl(invite.avatarDataUrl) : '',
     code,
     createdAt: Number.isFinite(invite.createdAt) ? invite.createdAt : Date.now(),
     creator: cleanProfile(invite.creator),

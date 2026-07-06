@@ -324,6 +324,7 @@ function publicRoomRecord(room) {
   const clean = cleanRoom(room)
   if (!clean) return null
   return {
+    avatarDataUrl: clean.avatarDataUrl,
     code: clean.code,
     kind: clean.kind,
     title: clean.title
@@ -352,6 +353,7 @@ function cleanRoom(room) {
         : code
 
   return {
+    avatarDataUrl: cleanAvatarDataUrl(room.avatarDataUrl),
     code,
     invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
     kind,

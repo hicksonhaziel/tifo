@@ -64,6 +64,7 @@ function createTifoRoomState(options = {}) {
     }
 
     return {
+      avatarDataUrl: cleanAvatarDataUrl(source.avatarDataUrl),
       code: cleanRoomCode(roomCode),
       invite: typeof source.invite === 'string' ? source.invite.trim().slice(0, 1400) : '',
       kind,

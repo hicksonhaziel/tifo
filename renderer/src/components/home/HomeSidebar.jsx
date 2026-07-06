@@ -1,5 +1,6 @@
-import { Check, Copy, Link2, Plus, Users } from 'lucide-react'
+import { Check, Copy, ImagePlus, Link2, Plus, Trash2, Users } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { useRef } from 'react'
 
 import { BallAvatar } from './BallAvatar.jsx'
 import { MenuButton, SearchInput, TextField } from './HomeSearchInput.jsx'
@@ -21,31 +22,38 @@ export function HomeSidebar({
   copyInvite,
   copyStatus,
   createdInvite,
-  dmHandle,
+  groupAvatarDataUrl,
+  groupAvatarError,
   groupName,
   inviteLink,
   onCreateDm,
   onCreateGroup,
+  onCreateRoom,
+  onDeleteChat,
+  onDeleteRoom,
   onJoinInvite,
   onOpenChat,
   onOpenCreated,
   onRoomClick,
   query,
+  roomDraft,
   rooms,
   setAddMenuOpen,
   setAddTab,
   setCreatedInvite,
   setCopyStatus,
-  setDmHandle,
+  setGroupAvatarDataUrl,
   setGroupName,
   setInviteLink,
+  setRoomDraftField,
   setQuery,
-  state
+  state,
+  uploadGroupAvatar
 }) {
   const profile = state.profile
   const username = usernameLabel(profile)
   const filteredChats = searchChats(chats, query)
-  const addPanelActive = ['join', 'create', 'dm'].includes(activePanel)
+  const addPanelActive = ['join', 'room', 'create', 'dm'].includes(activePanel)
   const unreadTotal = state.notifications?.unreadCount || 0
 
   return (
@@ -86,6 +94,7 @@ export function HomeSidebar({
             <SidebarRoom
               active={room.code === activeRoomCode}
               key={room.code}
+              onDelete={() => onDeleteRoom(room)}
               onClick={() => onRoomClick(room)}
               room={room}
             />
@@ -126,19 +135,24 @@ export function HomeSidebar({
                 copyInvite={copyInvite}
                 copyStatus={copyStatus}
                 createdInvite={createdInvite}
-                dmHandle={dmHandle}
+                groupAvatarDataUrl={groupAvatarDataUrl}
+                groupAvatarError={groupAvatarError}
                 groupName={groupName}
                 inviteLink={inviteLink}
                 onCreateDm={onCreateDm}
                 onCreateGroup={onCreateGroup}
+                onCreateRoom={onCreateRoom}
                 onJoinInvite={onJoinInvite}
                 onOpenCreated={onOpenCreated}
+                roomDraft={roomDraft}
                 setAddTab={setAddTab}
                 setCreatedInvite={setCreatedInvite}
                 setCopyStatus={setCopyStatus}
-                setDmHandle={setDmHandle}
+                setGroupAvatarDataUrl={setGroupAvatarDataUrl}
                 setGroupName={setGroupName}
                 setInviteLink={setInviteLink}
+                setRoomDraftField={setRoomDraftField}
+                uploadGroupAvatar={uploadGroupAvatar}
               />
             </motion.div>
           ) : null}
@@ -150,6 +164,7 @@ export function HomeSidebar({
               <SidebarChat
                 active={row.key === activeRoomCode || row.room?.code === activeRoomCode}
                 key={row.key}
+                onDelete={() => onDeleteChat(row)}
                 onClick={() => onOpenChat(row)}
                 row={row}
               />
@@ -172,12 +187,16 @@ function SideSection({ action, count, title }) {
   )
 }
 
-function SidebarRoom({ active, onClick, room }) {
+function SidebarRoom({ active, onClick, onDelete, room }) {
   return (
-    <button
+    <div
       className={`side-item ${active ? 'active' : ''} ${room.unread > 0 ? 'unread' : ''}`}
       onClick={onClick}
-      type='button'
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') onClick()
+      }}
+      role='button'
+      tabIndex={0}
     >
       <div className='ico' style={{ background: 'transparent', border: 0 }}>
         <BallAvatar size={44} />
@@ -187,19 +206,34 @@ function SidebarRoom({ active, onClick, room }) {
         <div className='t2'>{roomRound(room).split('·')[0].trim()}</div>
       </div>
       {room.unread > 0 ? <span className='badge'>{formatUnread(room.unread)}</span> : null}
-    </button>
+      <button
+        className='side-delete'
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        title='Delete room'
+        type='button'
+      >
+        <Trash2 size={13} strokeWidth={2.4} />
+      </button>
+    </div>
   )
 }
 
-function SidebarChat({ active, onClick, row }) {
+function SidebarChat({ active, onClick, onDelete, row }) {
   return (
-    <button
+    <div
       className={`side-item ${active ? 'active' : ''} ${row.unread > 0 ? 'unread' : ''}`}
       onClick={onClick}
-      type='button'
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') onClick()
+      }}
+      role='button'
+      tabIndex={0}
     >
       <div className='ico'>
-        {row.type === 'dm' && row.avatar ? (
+        {row.avatar ? (
           <img alt={row.title} src={row.avatar} />
         ) : (
           <div
@@ -226,7 +260,18 @@ function SidebarChat({ active, onClick, row }) {
         <div className='t2 c-mute t-xs'>{row.time}</div>
         {row.unread > 0 ? <span className='badge'>{formatUnread(row.unread)}</span> : null}
       </div>
-    </button>
+      <button
+        className='side-delete'
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        title={row.type === 'group' ? 'Delete group' : 'Delete chat'}
+        type='button'
+      >
+        <Trash2 size={13} strokeWidth={2.4} />
+      </button>
+    </div>
   )
 }
 
@@ -239,28 +284,36 @@ function AddMenu({
   copyInvite,
   copyStatus,
   createdInvite,
-  dmHandle,
+  groupAvatarDataUrl,
+  groupAvatarError,
   groupName,
   inviteLink,
   onCreateDm,
   onCreateGroup,
+  onCreateRoom,
   onJoinInvite,
   onOpenCreated,
+  roomDraft,
   setAddTab,
   setCreatedInvite,
   setCopyStatus,
-  setDmHandle,
+  setGroupAvatarDataUrl,
   setGroupName,
-  setInviteLink
+  setInviteLink,
+  setRoomDraftField,
+  uploadGroupAvatar
 }) {
+  const inviteReady = createdInvite && ['create', 'dm'].includes(addTab)
+
   return (
     <div
       className='card'
       style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12 }}
     >
-      <div className='rail-tabs' style={{ background: 'var(--bg-1)' }}>
+      <div className='rail-tabs add-tabs' style={{ background: 'var(--bg-1)' }}>
         {[
           ['join', 'Join'],
+          ['room', 'Room'],
           ['create', 'Group'],
           ['dm', 'DM']
         ].map(([key, label]) => (
@@ -293,60 +346,155 @@ function AddMenu({
         </form>
       ) : null}
 
+      {addTab === 'room' ? (
+        <form className='col' onSubmit={onCreateRoom} style={{ gap: 10 }}>
+          <div className='form-grid-2'>
+            <TextField
+              onChange={(value) => setRoomDraftField('homeName', value)}
+              placeholder='Home team'
+              value={roomDraft.homeName}
+            />
+            <TextField
+              onChange={(value) => setRoomDraftField('awayName', value)}
+              placeholder='Away team'
+              value={roomDraft.awayName}
+            />
+          </div>
+          <TextField
+            onChange={(value) => setRoomDraftField('round', value)}
+            placeholder='Competition or round'
+            value={roomDraft.round}
+          />
+          <MenuButton
+            disabled={!roomDraft.homeName.trim() || !roomDraft.awayName.trim()}
+            type='submit'
+          >
+            Create match room
+          </MenuButton>
+        </form>
+      ) : null}
+
       {addTab === 'create' ? (
         <form className='col' onSubmit={onCreateGroup} style={{ gap: 10 }}>
+          <GroupAvatarPicker
+            avatarDataUrl={groupAvatarDataUrl}
+            error={groupAvatarError}
+            onClear={() => setGroupAvatarDataUrl('')}
+            onUpload={uploadGroupAvatar}
+          />
           <TextField onChange={setGroupName} placeholder='Group name' value={groupName} />
-          {!createdInvite ? (
+          {!inviteReady ? (
             <MenuButton disabled={!groupName.trim()} type='submit'>
               Create private group
             </MenuButton>
           ) : (
-            <>
-              <div className='input' style={{ background: 'var(--bg-0)' }}>
-                <span className='prefix'>
-                  <Link2 size={12} />
-                </span>
-                <input
-                  onFocus={(event) => event.currentTarget.select()}
-                  readOnly
-                  value={createdInvite.inviteLink}
-                />
-                <button className='btn ghost sm' onClick={copyInvite} type='button'>
-                  {copyStatus === 'Copied' ? (
-                    <>
-                      <Check size={12} />
-                      Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={12} />
-                      Copy
-                    </>
-                  )}
-                </button>
-              </div>
-              <button className='btn primary sm' onClick={onOpenCreated} type='button'>
-                Open chat
-              </button>
-              <div className='t-xs c-mute'>Anyone with this link can join.</div>
-            </>
+            <CreatedInviteActions
+              copyInvite={copyInvite}
+              copyStatus={copyStatus}
+              inviteLink={createdInvite.inviteLink}
+              note='Anyone with this link can join.'
+              onOpenCreated={onOpenCreated}
+            />
           )}
         </form>
       ) : null}
 
       {addTab === 'dm' ? (
         <form className='col' onSubmit={onCreateDm} style={{ gap: 10 }}>
-          <TextField
-            icon={<span style={{ fontFamily: 'var(--font-mono)' }}>@</span>}
-            onChange={setDmHandle}
-            placeholder='fan.username'
-            value={dmHandle}
-          />
-          <MenuButton disabled={!dmHandle.trim()} type='submit'>
-            Start DM
-          </MenuButton>
+          <div className='dm-link-card'>
+            <div className='dm-link-icon'>
+              <Link2 size={14} strokeWidth={2.4} />
+            </div>
+            <div>
+              <div className='dm-link-title'>DM by private TIFO link</div>
+              <div className='dm-link-copy'>
+                Safer than usernames. The link carries the private chat key.
+              </div>
+            </div>
+          </div>
+          {!inviteReady ? (
+            <MenuButton type='submit'>Create DM link</MenuButton>
+          ) : (
+            <CreatedInviteActions
+              copyInvite={copyInvite}
+              copyStatus={copyStatus}
+              inviteLink={createdInvite.inviteLink}
+              note='Send this link to the person you want to DM.'
+              onOpenCreated={onOpenCreated}
+            />
+          )}
         </form>
       ) : null}
+    </div>
+  )
+}
+
+function CreatedInviteActions({ copyInvite, copyStatus, inviteLink, note, onOpenCreated }) {
+  return (
+    <>
+      <div className='input' style={{ background: 'var(--bg-0)' }}>
+        <span className='prefix'>
+          <Link2 size={12} />
+        </span>
+        <input onFocus={(event) => event.currentTarget.select()} readOnly value={inviteLink} />
+        <button className='btn ghost sm' onClick={copyInvite} type='button'>
+          {copyStatus === 'Copied' ? (
+            <>
+              <Check size={12} />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy size={12} />
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+      <button className='btn primary sm' onClick={onOpenCreated} type='button'>
+        Open chat
+      </button>
+      <div className='t-xs c-mute'>{note}</div>
+    </>
+  )
+}
+
+function GroupAvatarPicker({ avatarDataUrl, error, onClear, onUpload }) {
+  const inputRef = useRef(null)
+  return (
+    <div className='group-avatar-picker'>
+      <button
+        className='group-avatar-button'
+        onClick={() => inputRef.current?.click()}
+        type='button'
+      >
+        {avatarDataUrl ? (
+          <img alt='Group avatar' src={avatarDataUrl} />
+        ) : (
+          <ImagePlus size={17} strokeWidth={2.4} />
+        )}
+      </button>
+      <div className='grow col' style={{ gap: 2 }}>
+        <div className='group-avatar-title'>Group picture</div>
+        <div className='t-xs c-mute'>Optional image for the sidebar and header.</div>
+        {error ? <div className='t-xs avatar-error'>{error}</div> : null}
+      </div>
+      {avatarDataUrl ? (
+        <button className='btn ghost sm' onClick={onClear} type='button'>
+          Clear
+        </button>
+      ) : null}
+      <input
+        accept='image/png,image/jpeg,image/webp'
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ''
+          onUpload(file)
+        }}
+        ref={inputRef}
+        type='file'
+      />
     </div>
   )
 }

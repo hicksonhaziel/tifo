@@ -22,7 +22,9 @@ export function RoomView({ controller }) {
     const memberCount = Math.max(1, state.peerCount + 1)
     const title = state.roomTitle || (isDm ? 'Direct message' : 'Private group')
     const accent = isDm ? '#B87A70' : '#7FA6D1'
-    const conversationAvatar = isDm ? profileAvatarForName(state, title, `${title}-dm`) : ''
+    const conversationAvatar = isDm
+      ? profileAvatarForName(state, title, `${title}-dm`)
+      : state.roomAvatarDataUrl || ''
 
     return (
       <main
@@ -99,6 +101,8 @@ function ConversationHeader({
     <div className='content-header'>
       <div className='conversation-avatar avatar'>
         {isDm ? (
+          <img alt={title} src={avatar} />
+        ) : avatar ? (
           <img alt={title} src={avatar} />
         ) : (
           <div
