@@ -47,13 +47,15 @@ import {
   notificationForEvent,
   saveNotificationReadAt
 } from '../tifo/notifications.js'
+import {
+  loadDesktopNotificationIds,
+  showDesktopNotification as showNativeDesktopNotification
+} from '../tifo/desktop-notifications.js'
 import { loadCachedRoomEvents, mergeRoomEvents, saveCachedRoomEvents } from '../tifo/room-cache.js'
 import { imageFileSupported, mediaRefForBlob, prepareChatImage } from '../tifo/media.js'
 import {
-  cleanAvatarDataUrl,
   createLocalProfile,
   loadLocalProfile,
-  normalizeUsername,
   profileName,
   saveLocalProfile
 } from '../tifo/identity.js'
@@ -79,185 +81,13 @@ import {
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
-
-const desktopNotificationSeenKey = 'tifo:desktop-notifications-seen:v1'
-const maxDesktopNotificationSeen = 240
+import { mergeKnownProfiles, profilesFromEvents, workerProfileSignature } from '../tifo/profiles.js'
+import { knownMailboxRooms, mailboxSyncSignature } from '../tifo/worker-mailbox-sync.js'
 
 function cleanRoomCode(value) {
   return String(value || '')
     .trim()
     .toUpperCase()
-}
-
-function cleanPublicProfileKey(value) {
-  const key = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return /^[0-9a-f]{64}$/.test(key) ? key : ''
-}
-
-function cleanUserId(value) {
-  const userId = typeof value === 'string' ? value.trim() : ''
-  return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
-}
-
-function cleanDisplayName(value, fallback = 'Fan') {
-  const name = String(value || fallback)
-    .trim()
-    .replace(/^@+/, '')
-    .replace(/\s+/g, '_')
-    .slice(0, 24)
-  return name || fallback
-}
-
-function cleanKnownProfile(profile) {
-  if (!profile || typeof profile !== 'object') return null
-
-  const identityPublicKey = cleanPublicProfileKey(profile.identityPublicKey || profile.publicKey)
-  const publicKey = cleanPublicProfileKey(profile.publicKey) || identityPublicKey
-  const userId = cleanUserId(profile.userId)
-  const username = normalizeUsername(profile.username || profile.displayName || profile.nickname)
-  const displayName = cleanDisplayName(profile.displayName || profile.nickname || username)
-  if (!publicKey && !identityPublicKey && !userId && !username) return null
-
-  const updatedAt = Number(profile.updatedAt)
-  return {
-    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
-    displayName,
-    identityPublicKey,
-    publicKey,
-    updatedAt: Number.isFinite(updatedAt) ? Math.max(0, Math.round(updatedAt)) : 0,
-    userId,
-    username,
-    verified: profile.verified === true
-  }
-}
-
-function knownProfileAliases(profile) {
-  const aliases = new Set()
-  if (profile.identityPublicKey) aliases.add(profile.identityPublicKey)
-  if (profile.publicKey) aliases.add(profile.publicKey)
-  if (profile.userId) aliases.add(profile.userId)
-  if (profile.username) aliases.add(`name:${profile.username}`)
-  const displayAlias = normalizeUsername(profile.displayName)
-  if (displayAlias) aliases.add(`name:${displayAlias}`)
-  return Array.from(aliases)
-}
-
-function mergeKnownProfile(previous, incoming) {
-  const previousUpdatedAt = previous?.updatedAt || 0
-  const incomingUpdatedAt = incoming.updatedAt || 0
-  const useIncomingAvatar =
-    !!incoming.avatarDataUrl && (!previous?.avatarDataUrl || incomingUpdatedAt >= previousUpdatedAt)
-
-  return {
-    ...previous,
-    ...incoming,
-    avatarDataUrl: useIncomingAvatar ? incoming.avatarDataUrl : previous?.avatarDataUrl || '',
-    updatedAt: Math.max(previousUpdatedAt, incomingUpdatedAt)
-  }
-}
-
-function knownProfileSignature(profile) {
-  if (!profile) return ''
-  return [
-    profile.avatarDataUrl || '',
-    profile.displayName || '',
-    profile.identityPublicKey || '',
-    profile.publicKey || '',
-    profile.updatedAt || 0,
-    profile.userId || '',
-    profile.username || '',
-    profile.verified === true ? '1' : '0'
-  ].join('|')
-}
-
-function mergeKnownProfiles(existing = {}, profiles = []) {
-  let next = existing || {}
-  let changed = false
-
-  for (const profile of profiles) {
-    const clean = cleanKnownProfile(profile)
-    if (!clean) continue
-
-    for (const alias of knownProfileAliases(clean)) {
-      const previous = next[alias]
-      const merged = mergeKnownProfile(previous, clean)
-      if (knownProfileSignature(previous) === knownProfileSignature(merged)) continue
-      if (!changed) next = { ...next }
-      next[alias] = merged
-      changed = true
-    }
-  }
-
-  return changed ? next : existing || {}
-}
-
-function profileFromEvent(event) {
-  if (!event || typeof event !== 'object') return null
-  return {
-    displayName: event.sender,
-    identityPublicKey: event.senderIdentityKey || event.senderKey || '',
-    publicKey: event.senderKey || event.senderIdentityKey || '',
-    updatedAt: Number.isFinite(event.timestamp) ? event.timestamp : 0,
-    userId: event.senderId || '',
-    username: event.sender
-  }
-}
-
-function profilesFromEvents(events = []) {
-  return events.map(profileFromEvent).filter(Boolean)
-}
-
-function workerProfileSignature(profile) {
-  if (!profile) return ''
-  return JSON.stringify({
-    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
-    displayName: profile.displayName || '',
-    identityPublicKey: cleanPublicProfileKey(profile.identityPublicKey || profile.publicKey),
-    publicKey: cleanPublicProfileKey(profile.publicKey || profile.identityPublicKey),
-    updatedAt: Number.isFinite(profile.updatedAt) ? Math.max(0, Math.round(profile.updatedAt)) : 0,
-    userId: cleanUserId(profile.userId),
-    username: normalizeUsername(profile.username || profile.displayName || profile.nickname)
-  })
-}
-
-function mailboxSyncSignature(profile, rooms = []) {
-  return JSON.stringify({
-    profile: workerProfileSignature(profile),
-    rooms: rooms.map(mailboxRoomSignature).sort((left, right) => left.key.localeCompare(right.key))
-  })
-}
-
-function mailboxRoomSignature(room) {
-  const kind = room?.kind === 'dm' ? 'dm' : room?.kind === 'group' ? 'group' : 'match'
-  const code = cleanRoomCode(room?.code)
-  const topicKey = typeof room?.topicKey === 'string' ? room.topicKey.trim().toLowerCase() : ''
-  const key = `${kind}:${topicKey || code}`
-
-  return {
-    avatarDataUrl: cleanAvatarDataUrl(room?.avatarDataUrl),
-    code,
-    invite: typeof room?.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
-    key,
-    kind,
-    title: typeof room?.title === 'string' ? room.title.trim().replace(/\s+/g, ' ') : '',
-    topicKey
-  }
-}
-
-function loadDesktopNotificationIds() {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(desktopNotificationSeenKey) || '[]')
-    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [])
-  } catch {
-    return new Set()
-  }
-}
-
-function saveDesktopNotificationIds(ids) {
-  try {
-    const keep = Array.from(ids).slice(-maxDesktopNotificationSeen)
-    window.localStorage.setItem(desktopNotificationSeenKey, JSON.stringify(keep))
-  } catch {}
 }
 
 export function useTifoController() {
@@ -367,33 +197,6 @@ export function useTifoController() {
 
   function clearRoomReady() {
     pendingRoomCodeRef.current = ''
-  }
-
-  function knownMailboxRooms(state = stateRef.current) {
-    const publicRooms = (state.matchRooms || []).map((room) => ({
-      avatarDataUrl: room.avatarDataUrl || '',
-      code: room.code,
-      createdAt: room.createdAt || 0,
-      invite: room.invite || '',
-      kind: 'match',
-      title: room.title,
-      away: room.away || '',
-      awayName: room.awayName || '',
-      home: room.home || '',
-      homeName: room.homeName || '',
-      round: room.round || room.region || ''
-    }))
-
-    const privateRooms = (state.recentPrivateRooms || []).map((room) => ({
-      avatarDataUrl: room.avatarDataUrl || '',
-      code: room.code,
-      invite: room.invite || '',
-      kind: room.kind,
-      title: room.title,
-      topicKey: room.topicKey || ''
-    }))
-
-    return [...publicRooms, ...privateRooms]
   }
 
   function syncWorkerProfile(profile = stateRef.current.profile, options = {}) {
@@ -516,20 +319,10 @@ export function useTifoController() {
   }
 
   function showDesktopNotification(notification) {
-    if (!notification || desktopNotificationIdsRef.current.has(notification.id)) return
-    if (notification.read === true && !appIsBackgrounded()) return
-
-    desktopNotificationIdsRef.current.add(notification.id)
-    saveDesktopNotificationIds(desktopNotificationIdsRef.current)
-    window.bridge
-      ?.showNotification?.({
-        body: notification.body,
-        iconDataUrl: notification.avatarDataUrl,
-        id: notification.id,
-        roomCode: notification.roomCode,
-        title: `${notification.sender} · ${notification.roomTitle || 'TIFO'}`
-      })
-      ?.catch?.(() => {})
+    showNativeDesktopNotification(notification, {
+      appIsBackgrounded,
+      seenIds: desktopNotificationIdsRef.current
+    })
   }
 
   function notificationForIncomingEvent(event, state = stateRef.current, options = {}) {
