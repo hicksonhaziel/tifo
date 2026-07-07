@@ -48,13 +48,7 @@ import {
   saveNotificationReadAt
 } from '../tifo/notifications.js'
 import { loadCachedRoomEvents, mergeRoomEvents, saveCachedRoomEvents } from '../tifo/room-cache.js'
-import {
-  imageFileSupported,
-  imageMimeType,
-  mediaRefForBlob,
-  mediaRefForFile,
-  readImageDimensions
-} from '../tifo/media.js'
+import { imageFileSupported, mediaRefForBlob, prepareChatImage } from '../tifo/media.js'
 import {
   cleanAvatarDataUrl,
   createLocalProfile,
@@ -1851,10 +1845,8 @@ export function useTifoController() {
       return
     }
 
-    let objectUrl = ''
+    let previewUrl = ''
     try {
-      objectUrl = URL.createObjectURL(file)
-      const localPath = localPathForFile(file)
       setAppState((state) => ({
         ...state,
         chatMedia: {
@@ -1864,28 +1856,28 @@ export function useTifoController() {
         }
       }))
 
-      const [mediaRef, dimensions, bytesBase64] = await Promise.all([
-        mediaRefForFile(file, 'image'),
-        readImageDimensions(objectUrl),
-        localPath ? Promise.resolve('') : blobToBase64(file)
+      const prepared = await prepareChatImage(file)
+      previewUrl = prepared.previewUrl
+      const [mediaRef, bytesBase64] = await Promise.all([
+        mediaRefForBlob(prepared.blob, 'image'),
+        blobToBase64(prepared.blob)
       ])
       const clientId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
-      pendingChatMediaPreviewsRef.current.set(clientId, { url: objectUrl })
+      pendingChatMediaPreviewsRef.current.set(clientId, { url: previewUrl })
 
       sendWorkerCommand('chat-media:save', {
         bytesBase64,
         caption: caption.trim().slice(0, 140),
         clientId,
-        height: dimensions?.height || null,
+        height: prepared.height,
         kind: 'image',
-        localPath,
         mediaRef,
-        mimeType: imageMimeType(file),
+        mimeType: prepared.mimeType,
         replyTo,
         roomCode,
-        size: file.size,
-        width: dimensions?.width || null
+        size: prepared.blob.size,
+        width: prepared.width
       })
 
       setAppState((state) => ({
@@ -1899,7 +1891,7 @@ export function useTifoController() {
         }
       }))
     } catch (err) {
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
       setAppState((state) => ({
         ...state,
         chatMedia: {
