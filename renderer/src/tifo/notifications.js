@@ -1,4 +1,5 @@
 import { eventMeta, isOwnEvent } from './domain.js'
+import { cleanAvatarDataUrl, normalizeUsername } from './identity.js'
 
 const readAtStorageKey = 'tifo:notification-read-at:v1'
 const maxNotifications = 80
@@ -54,8 +55,63 @@ export function notificationForEvent(event, state) {
         ? state.roomTitle
         : state.notificationRoomTitle || event.room || 'TIFO',
     sender: event.sender || 'Fan',
+    avatarDataUrl: notificationAvatarForEvent(event, state),
     timestamp: event.timestamp || Date.now()
   }
+}
+
+function notificationAvatarForEvent(event, state = {}) {
+  const room = roomForNotification(event.room, state)
+  const kind = room?.kind || (state.roomCode === event.room ? state.roomKind : '')
+
+  if (kind === 'dm') return cleanAvatarDataUrl(profileForEvent(event, state)?.avatarDataUrl)
+  if (kind === 'group' || kind === 'match') return cleanAvatarDataUrl(room?.avatarDataUrl)
+
+  return cleanAvatarDataUrl(room?.avatarDataUrl || profileForEvent(event, state)?.avatarDataUrl)
+}
+
+function roomForNotification(roomCode, state = {}) {
+  const cleanRoomCode = String(roomCode || '').trim()
+  if (!cleanRoomCode) return null
+
+  if (state.notificationRoom?.code === cleanRoomCode) return state.notificationRoom
+  if (state.roomCode === cleanRoomCode) {
+    return {
+      avatarDataUrl: state.roomAvatarDataUrl || '',
+      code: state.roomCode,
+      kind: state.roomKind || '',
+      title: state.roomTitle || ''
+    }
+  }
+
+  return (
+    (state.recentPrivateRooms || []).find((room) => room.code === cleanRoomCode) ||
+    (state.matchRooms || []).find((room) => room.code === cleanRoomCode) ||
+    null
+  )
+}
+
+function profileForEvent(event, state = {}) {
+  return (
+    knownProfileForKey(state, event?.senderIdentityKey) ||
+    knownProfileForKey(state, event?.senderKey) ||
+    knownProfileForKey(state, event?.senderId) ||
+    knownProfileForName(state, event?.sender)
+  )
+}
+
+function knownProfileForKey(state, key) {
+  const cleanKey = typeof key === 'string' ? key.trim() : ''
+  if (!cleanKey) return null
+  return (
+    state.knownProfiles?.[/^[0-9a-f]{64}$/i.test(cleanKey) ? cleanKey.toLowerCase() : cleanKey] ||
+    null
+  )
+}
+
+function knownProfileForName(state, name) {
+  const username = normalizeUsername(name)
+  return username ? state.knownProfiles?.[`name:${username}`] || null : null
 }
 
 export function addNotification(notifications, notification) {

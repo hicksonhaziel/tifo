@@ -524,6 +524,7 @@ export function useTifoController() {
     window.bridge
       ?.showNotification?.({
         body: notification.body,
+        iconDataUrl: notification.avatarDataUrl,
         id: notification.id,
         roomCode: notification.roomCode,
         title: `${notification.sender} · ${notification.roomTitle || 'TIFO'}`
@@ -535,6 +536,7 @@ export function useTifoController() {
     const notification = notificationForEvent(event, {
       ...state,
       appActive: !appIsBackgrounded(),
+      notificationRoom: options.room || null,
       notificationRoomTitle: options.roomTitle || ''
     })
     showDesktopNotification(notification)
@@ -1050,6 +1052,7 @@ export function useTifoController() {
           )
           saveCachedRoomEvents(message.event.room, roomEvents)
           const notification = notificationForIncomingEvent(message.event, stateRef.current, {
+            room: message.room || null,
             roomTitle: message.room?.title || ''
           })
           setAppState((state) => ({

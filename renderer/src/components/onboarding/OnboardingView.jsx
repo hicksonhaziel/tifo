@@ -217,7 +217,8 @@ function ProfilePreview({
   ready,
   username
 }) {
-  const avatar = avatarDataUrl || avatarUrl(username || 'preview')
+  const avatarInitial = username.trim().slice(0, 1).toUpperCase() || 'U'
+  const avatarTone = avatarToneForUsername(username)
 
   return (
     <div className='mt-6'>
@@ -228,11 +229,24 @@ function ProfilePreview({
         <div className='flex items-center gap-3'>
           <button
             className='group relative flex h-[46px] w-[46px] shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.12] bg-[linear-gradient(135deg,#2a2e33,#16191b)] outline-none transition hover:border-[#B8D4C6]/50 focus-visible:ring-4 focus-visible:ring-[#6FA890]/20'
+            style={avatarDataUrl ? undefined : avatarTone}
             type='button'
             onClick={onChooseAvatar}
             title='Choose profile picture'
           >
-            <img className='block h-full w-full object-cover' src={avatar} alt='' />
+            {avatarDataUrl ? (
+              <img className='block h-full w-full object-cover' src={avatarDataUrl} alt='' />
+            ) : (
+              <motion.span
+                key={avatarInitial}
+                className='select-none text-[19px] font-black uppercase text-[#F1EEE8]'
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+              >
+                {avatarInitial}
+              </motion.span>
+            )}
             <span className='absolute inset-0 flex items-center justify-center bg-black/42 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100'>
               <Camera size={16} strokeWidth={2.4} className='text-[#F1EEE8]' />
             </span>
@@ -266,8 +280,18 @@ function ProfilePreview({
   )
 }
 
-function avatarUrl(seed) {
-  return `https://api.dicebear.com/9.x/notionists/svg?seed=${encodeURIComponent(
-    seed
-  )}&backgroundColor=1a1e22,22272c,2b3137&backgroundType=solid&radius=50`
+function avatarToneForUsername(username) {
+  const tones = [
+    ['#2A3B35', '#131715'],
+    ['#333B4B', '#15171D'],
+    ['#423A32', '#161514'],
+    ['#3B2F38', '#171418'],
+    ['#243B43', '#111719']
+  ]
+  const clean = username || 'username'
+  const sum = Array.from(clean).reduce((total, char) => total + char.charCodeAt(0), 0)
+  const [from, to] = tones[sum % tones.length]
+  return {
+    background: `linear-gradient(135deg, ${from}, ${to})`
+  }
 }

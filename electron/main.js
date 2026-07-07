@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, Notification } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, Notification, nativeImage } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -206,7 +206,7 @@ ipcMain.handle('app:showNotification', (evt, payload = {}) => {
 
   const notification = new Notification({
     body,
-    icon: appIcon,
+    icon: notificationIconFromPayload(payload),
     silent: payload.silent === true,
     title
   })
@@ -222,6 +222,19 @@ ipcMain.handle('app:showNotification', (evt, payload = {}) => {
   notification.show()
   return { ok: true }
 })
+
+function notificationIconFromPayload(payload = {}) {
+  const iconDataUrl = typeof payload.iconDataUrl === 'string' ? payload.iconDataUrl.trim() : ''
+  if (!iconDataUrl || iconDataUrl.length > 320000) return appIcon
+  if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(iconDataUrl)) return appIcon
+
+  try {
+    const image = nativeImage.createFromDataURL(iconDataUrl)
+    return image.isEmpty() ? appIcon : image.resize({ height: 96, width: 96 })
+  } catch {
+    return appIcon
+  }
+}
 
 ipcMain.handle('app:setBadgeCount', (evt, count = 0) => {
   const cleanCount = Number.isFinite(count) ? Math.max(0, Math.min(999, Math.round(count))) : 0
