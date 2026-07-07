@@ -3,6 +3,9 @@ export function createWorkerClient({ decoder, onMessage }) {
   const workers = {
     main: '/workers/main.js'
   }
+  const debugWorkerIpc =
+    window.localStorage?.getItem?.('tifo:debug-worker-ipc') === '1' ||
+    window.localStorage?.getItem?.('tifo:debug-worker-ipc') === 'true'
 
   function send(type, payload = {}) {
     return bridge.writeWorkerIPC(workers.main, JSON.stringify({ ...payload, type }))
@@ -14,20 +17,35 @@ export function createWorkerClient({ decoder, onMessage }) {
 
     cleanups.push(
       bridge.onWorkerStdout(workers.main, (data) => {
-        console.log('worker stdout', '[', workers.main, ']:', decoder.decode(data))
+        if (!debugWorkerIpc) return
+        console.log(
+          'worker stdout',
+          '[',
+          workers.main,
+          ']:',
+          truncateWorkerLog(decoder.decode(data))
+        )
       })
     )
 
     cleanups.push(
       bridge.onWorkerStderr(workers.main, (data) => {
-        console.error('worker stderr', '[', workers.main, ']:', decoder.decode(data))
+        console.error(
+          'worker stderr',
+          '[',
+          workers.main,
+          ']:',
+          truncateWorkerLog(decoder.decode(data))
+        )
       })
     )
 
     cleanups.push(
       bridge.onWorkerIPC(workers.main, (data) => {
         const message = decoder.decode(data)
-        console.log('worker ipc', '[', workers.main, ']:', message)
+        if (debugWorkerIpc) {
+          console.log('worker ipc', '[', workers.main, ']:', workerMessageSummary(message))
+        }
 
         let parsed = null
         try {
@@ -54,7 +72,7 @@ export function createWorkerClient({ decoder, onMessage }) {
 
     cleanups.push(
       bridge.onWorkerExit(workers.main, (code) => {
-        console.log('Worker exited with code', code)
+        if (debugWorkerIpc) console.log('Worker exited with code', code)
         onMessage({
           syncStatus: 'Worker stopped',
           type: 'app:worker-exit',
@@ -72,4 +90,29 @@ export function createWorkerClient({ decoder, onMessage }) {
     send,
     start
   }
+}
+
+function workerMessageSummary(message) {
+  let parsed = null
+  try {
+    parsed = JSON.parse(message)
+  } catch {
+    return truncateWorkerLog(message)
+  }
+
+  if (!parsed || typeof parsed !== 'object') return truncateWorkerLog(message)
+  return {
+    command: parsed.command,
+    count: parsed.count,
+    eventId: parsed.eventId,
+    room: parsed.room || parsed.event?.room,
+    size: message.length,
+    status: parsed.status,
+    type: parsed.type
+  }
+}
+
+function truncateWorkerLog(value) {
+  const text = String(value || '')
+  return text.length > 500 ? `${text.slice(0, 500)}... (${text.length} chars)` : text
 }

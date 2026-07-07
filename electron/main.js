@@ -13,6 +13,7 @@ const protocol = name
 const mainWorkerSpecifier = '/workers/main.js'
 
 const workers = new Map()
+let appIsQuitting = false
 
 const appName = productName ?? name
 const appId = 'com.tifo.TIFO'
@@ -50,7 +51,12 @@ function getAppPath() {
 
 function sendToAll(name, data) {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(name, data)
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue
+    try {
+      win.webContents.send(name, data)
+    } catch (err) {
+      if (!appIsQuitting) console.warn('Could not send renderer IPC:', err.message)
+    }
   }
 }
 
@@ -228,6 +234,10 @@ function handleDeepLink(url) {
 
 app.setAsDefaultProtocolClient(protocol)
 Menu.setApplicationMenu(null)
+
+app.on('before-quit', () => {
+  appIsQuitting = true
+})
 
 app.on('open-url', (evt, url) => {
   evt.preventDefault()

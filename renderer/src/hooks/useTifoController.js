@@ -207,6 +207,43 @@ function profilesFromEvents(events = []) {
   return events.map(profileFromEvent).filter(Boolean)
 }
 
+function workerProfileSignature(profile) {
+  if (!profile) return ''
+  return JSON.stringify({
+    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
+    displayName: profile.displayName || '',
+    identityPublicKey: cleanPublicProfileKey(profile.identityPublicKey || profile.publicKey),
+    publicKey: cleanPublicProfileKey(profile.publicKey || profile.identityPublicKey),
+    updatedAt: Number.isFinite(profile.updatedAt) ? Math.max(0, Math.round(profile.updatedAt)) : 0,
+    userId: cleanUserId(profile.userId),
+    username: normalizeUsername(profile.username || profile.displayName || profile.nickname)
+  })
+}
+
+function mailboxSyncSignature(profile, rooms = []) {
+  return JSON.stringify({
+    profile: workerProfileSignature(profile),
+    rooms: rooms.map(mailboxRoomSignature).sort((left, right) => left.key.localeCompare(right.key))
+  })
+}
+
+function mailboxRoomSignature(room) {
+  const kind = room?.kind === 'dm' ? 'dm' : room?.kind === 'group' ? 'group' : 'match'
+  const code = cleanRoomCode(room?.code)
+  const topicKey = typeof room?.topicKey === 'string' ? room.topicKey.trim().toLowerCase() : ''
+  const key = `${kind}:${topicKey || code}`
+
+  return {
+    avatarDataUrl: cleanAvatarDataUrl(room?.avatarDataUrl),
+    code,
+    invite: typeof room?.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
+    key,
+    kind,
+    title: typeof room?.title === 'string' ? room.title.trim().replace(/\s+/g, ' ') : '',
+    topicKey
+  }
+}
+
 function loadDesktopNotificationIds() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(desktopNotificationSeenKey) || '[]')
@@ -258,11 +295,13 @@ export function useTifoController() {
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
   const desktopNotificationIdsRef = useRef(loadDesktopNotificationIds())
+  const mailboxSyncSignatureRef = useRef('')
   const pendingChatSendsRef = useRef([])
   const pendingRoomCodeRef = useRef('')
   const seenEffectEventIdsRef = useRef(new Set())
   const typingSentAtRef = useRef(0)
   const typingCleanupTimerRef = useRef(null)
+  const workerProfileSyncSignatureRef = useRef('')
 
   const activeChantRecorderRef = useRef(null)
   const activeChantStreamRef = useRef(null)
@@ -357,13 +396,33 @@ export function useTifoController() {
     return [...publicRooms, ...privateRooms]
   }
 
-  function syncWorkerMailbox(state = stateRef.current) {
+  function syncWorkerProfile(profile = stateRef.current.profile, options = {}) {
+    if (!profile) return false
+
+    const signature = workerProfileSignature(profile)
+    if (!options.force && signature === workerProfileSyncSignatureRef.current) return false
+
+    workerProfileSyncSignatureRef.current = signature
+    sendWorkerCommand('profile:set', { profile })
+    return true
+  }
+
+  function syncWorkerMailbox(state = stateRef.current, options = {}) {
     if (!state.profile) return
-    sendWorkerCommand('profile:set', { profile: state.profile })
+    syncWorkerProfile(state.profile, {
+      force: options.force === true || options.forceProfile === true
+    })
+
+    const rooms = knownMailboxRooms(state)
+    const signature = mailboxSyncSignature(state.profile, rooms)
+    if (!options.force && signature === mailboxSyncSignatureRef.current) return false
+
+    mailboxSyncSignatureRef.current = signature
     sendWorkerCommand('mailbox:known', {
       profile: state.profile,
-      rooms: knownMailboxRooms(state)
+      rooms
     })
+    return true
   }
 
   function withMatchInvite(room) {
@@ -954,7 +1013,7 @@ export function useTifoController() {
           syncStatus: message.syncStatus || 'Worker ready',
           lastError: ''
         }))
-        syncWorkerMailbox()
+        syncWorkerMailbox(stateRef.current, { force: true })
         break
       case 'app:worker-exit':
         setAppState((state) => ({
@@ -2348,7 +2407,6 @@ export function useTifoController() {
         recentPrivateRooms,
         view: 'home'
       }))
-      sendWorkerCommand('profile:set', { profile })
       syncWorkerMailbox()
     } catch (err) {
       setAppState((state) => ({
@@ -2618,7 +2676,7 @@ export function useTifoController() {
     }))
     markCurrentRoomRead(targetRoomCode, { announce: false })
 
-    sendWorkerCommand('profile:set', { profile })
+    syncWorkerProfile(profile)
     sendWorkerCommand('room:join', {
       cachedEvents,
       profile,

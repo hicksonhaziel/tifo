@@ -110,6 +110,8 @@ let joiningRoomCode = ''
 let roomJoinSequence = 0
 let lastPendingFlushCount = 0
 let lastSyncAt = null
+let lastMailboxKnownSignature = ''
+let lastProfileSetSignature = ''
 
 const roomState = createTifoRoomState({
   send,
@@ -843,8 +845,18 @@ async function setSimulatedOffline(enabled) {
 
 async function handleProfileSet(command) {
   const profile = await ensureWorkerProfile(command.profile)
+  const signature = profileSyncSignature(profile)
+  if (
+    signature &&
+    signature === lastProfileSetSignature &&
+    profileSyncSignature(roomState.state.profile) === signature
+  ) {
+    return
+  }
+
   await mailbox.setProfile(profile)
   await roomState.handleCommand({ ...command, profile })
+  lastProfileSetSignature = signature
   sendKnownContacts('profile ready')
   sendAllPeerSnapshots()
   broadcastAppIdentity()
@@ -854,11 +866,16 @@ async function handleProfileSet(command) {
 }
 
 async function handleMailboxKnown(command) {
-  if (command.profile) {
-    const profile = await ensureWorkerProfile(command.profile)
-    await mailbox.setProfile(profile)
-  }
   const rooms = Array.isArray(command.rooms) ? command.rooms : []
+  let profile = command.profile || roomState.state.profile
+  if (command.profile) {
+    profile = await ensureWorkerProfile(command.profile)
+  }
+  const signature = mailboxKnownSignature(profile, rooms)
+  if (signature && signature === lastMailboxKnownSignature) return
+
+  lastMailboxKnownSignature = signature
+  if (profile) await mailbox.setProfile(profile)
   const roomAnnouncementsChanged = rememberMatchRooms(rooms)
   const topicHashes = await mailbox.setKnownRooms(rooms)
   await processKnownMailboxRecords(topicHashes).catch(() => {})
@@ -990,6 +1007,84 @@ function cleanPublicRoomCode(value) {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 48)
+}
+
+function profileSyncSignature(profile) {
+  const publicKey = normalizeKeyHex(profile?.publicKey || profile?.identityPublicKey)
+  if (!publicKey) return ''
+
+  return JSON.stringify({
+    avatarDataUrl: cleanAvatarDataUrl(profile.avatarDataUrl),
+    devicePublicKey: normalizeKeyHex(profile.devicePublicKey) || '',
+    displayName: cleanSyncUsername(profile.displayName || profile.username || profile.nickname),
+    profileProof:
+      typeof profile.profileProof === 'string' ? profile.profileProof.trim().slice(0, 4096) : '',
+    publicKey,
+    updatedAt: Number.isFinite(profile.updatedAt) ? Math.max(0, Math.round(profile.updatedAt)) : 0,
+    userId: cleanSyncUserId(profile.userId),
+    username: cleanSyncUsername(profile.username || profile.displayName || profile.nickname)
+  })
+}
+
+function mailboxKnownSignature(profile, rooms = []) {
+  return JSON.stringify({
+    profile: profileSyncSignature(profile),
+    rooms: rooms
+      .map(mailboxKnownRoomSignature)
+      .filter(Boolean)
+      .sort((left, right) => left.key.localeCompare(right.key))
+  })
+}
+
+function mailboxKnownRoomSignature(room) {
+  if (!room || typeof room !== 'object') return null
+
+  const kind =
+    room.kind === 'dm' ? 'dm' : room.kind === 'group' || room.kind === 'private' ? 'group' : 'match'
+  if (kind === 'match') {
+    const clean = cleanMatchRoomAnnouncement(room)
+    if (!clean) return null
+    return {
+      avatarDataUrl: clean.avatarDataUrl,
+      code: clean.code,
+      invite: clean.invite,
+      key: `match:${clean.code}`,
+      kind: 'match',
+      round: clean.round,
+      title: clean.title
+    }
+  }
+
+  const code = cleanPublicRoomCode(room.code)
+  const topicKey =
+    typeof room.topicKey === 'string' && /^[0-9a-f]{64}$/i.test(room.topicKey.trim())
+      ? room.topicKey.trim().toLowerCase()
+      : ''
+  if (!code || !topicKey) return null
+
+  return {
+    avatarDataUrl: cleanAvatarDataUrl(room.avatarDataUrl),
+    code,
+    invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
+    key: `${kind}:${topicKey}`,
+    kind,
+    title: cleanPublicRoomTitle(room.title || room.peerHandle || code),
+    topicKey
+  }
+}
+
+function cleanSyncUsername(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 24)
+}
+
+function cleanSyncUserId(value) {
+  const userId = typeof value === 'string' ? value.trim() : ''
+  return /^[a-z0-9_-]{6,48}$/i.test(userId) ? userId : ''
 }
 
 function isRoomScopedCommand(command) {
