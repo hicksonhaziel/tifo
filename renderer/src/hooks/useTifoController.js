@@ -66,6 +66,7 @@ import {
 import {
   createDmInvite,
   createDmInviteForPeer,
+  createMatchRoomInvite,
   createPrivateGroupInvite,
   deleteRecentPrivateRoom,
   encodeInvite,
@@ -74,7 +75,13 @@ import {
   parseInvite,
   saveRecentPrivateRoom
 } from '../tifo/invites.js'
-import { createMatchRoom, deleteMatchRoom, loadMatchRooms, saveMatchRoom } from '../tifo/rooms.js'
+import {
+  createMatchRoom,
+  deleteMatchRoom,
+  loadMatchRooms,
+  mergeMatchRooms,
+  saveMatchRoom
+} from '../tifo/rooms.js'
 import { createInitialState, clipDraftIdle, replayIdleState } from '../tifo/state.js'
 import { createWorkerClient } from '../tifo/worker-client.js'
 import { formatReplayOffset } from '../tifo/format.js'
@@ -257,6 +264,7 @@ export function useTifoController() {
   const pendingClipLoadsRef = useRef(new Map())
   const pendingClipPreviewsRef = useRef(new Map())
   const desktopNotificationIdsRef = useRef(loadDesktopNotificationIds())
+  const pendingChatSendsRef = useRef([])
   const pendingRoomCodeRef = useRef('')
   const seenEffectEventIdsRef = useRef(new Set())
   const typingSentAtRef = useRef(0)
@@ -332,8 +340,15 @@ export function useTifoController() {
     const publicRooms = (state.matchRooms || []).map((room) => ({
       avatarDataUrl: room.avatarDataUrl || '',
       code: room.code,
+      createdAt: room.createdAt || 0,
+      invite: room.invite || '',
       kind: 'match',
-      title: room.title
+      title: room.title,
+      away: room.away || '',
+      awayName: room.awayName || '',
+      home: room.home || '',
+      homeName: room.homeName || '',
+      round: room.round || room.region || ''
     }))
 
     const privateRooms = (state.recentPrivateRooms || []).map((room) => ({
@@ -355,6 +370,29 @@ export function useTifoController() {
       profile: state.profile,
       rooms: knownMailboxRooms(state)
     })
+  }
+
+  function withMatchInvite(room) {
+    if (!room || room.kind !== 'match') return room
+    if (room.invite) return room
+    const invite = createMatchRoomInvite(room, { profile: stateRef.current.profile })
+    return {
+      ...room,
+      invite: encodeInvite(invite)
+    }
+  }
+
+  function rememberMatchRooms(rooms = []) {
+    const matchRooms = mergeMatchRooms(rooms.map(withMatchInvite).filter(Boolean))
+    setAppState((state) => ({
+      ...state,
+      matchRooms
+    }))
+    syncWorkerMailbox({
+      ...stateRef.current,
+      matchRooms
+    })
+    return matchRooms
   }
 
   function withLocalProfileAvatar(profile, fallback = stateRef.current.profile) {
@@ -829,8 +867,37 @@ export function useTifoController() {
     }, 2200)
   }
 
+  function rememberPendingChatSend(roomCode, text) {
+    pendingChatSendsRef.current.push({
+      createdAt: Date.now(),
+      roomCode,
+      text
+    })
+    if (pendingChatSendsRef.current.length > 12) pendingChatSendsRef.current.shift()
+  }
+
+  function clearPendingChatSend(event) {
+    if (event?.type !== 'chat') return
+    const index = pendingChatSendsRef.current.findIndex(
+      (item) => item.roomCode === event.room && item.text === event.payload?.text
+    )
+    if (index >= 0) pendingChatSendsRef.current.splice(index, 1)
+  }
+
+  function restoreLastPendingChatSend() {
+    const pending = pendingChatSendsRef.current.pop()
+    if (!pending) return
+    if (Date.now() - pending.createdAt > 120000) return
+    if (stateRef.current.view !== 'room' || stateRef.current.roomCode !== pending.roomCode) return
+    setAppState((state) => ({
+      ...state,
+      chatDraft: state.chatDraft || pending.text
+    }))
+  }
+
   function upsertEvent(event) {
     if (!event?.room) return
+    clearPendingChatSend(event)
 
     const visibleRoom = stateRef.current.view === 'room' && stateRef.current.roomCode === event.room
     const cachedEvents = mergeRoomEvents([event], loadCachedRoomEvents(event.room), event.room)
@@ -914,6 +981,11 @@ export function useTifoController() {
         break
       case 'profile:contacts':
         rememberKnownProfiles(message.contacts || [])
+        break
+      case 'rooms:discovered':
+        if (Array.isArray(message.rooms) && message.rooms.length > 0) {
+          rememberMatchRooms(message.rooms)
+        }
         break
       case 'mailbox:conversation':
         if (message.room) rememberPrivateRoom(message.room)
@@ -1153,6 +1225,9 @@ export function useTifoController() {
       case 'echo:replay':
         break
       case 'error':
+        if (message.command === 'chat:send' || message.command === 'room:join') {
+          restoreLastPendingChatSend()
+        }
         setAppState((state) => ({
           ...state,
           lastError: message.message || 'Worker error',
@@ -2356,7 +2431,13 @@ export function useTifoController() {
 
   function createMatchRoomFromInput(input = {}) {
     try {
-      const room = createMatchRoom(input, stateRef.current.matchRooms)
+      const baseRoom = createMatchRoom(input, stateRef.current.matchRooms)
+      const invite = createMatchRoomInvite(baseRoom, { profile: stateRef.current.profile })
+      const inviteLink = encodeInvite(invite)
+      const room = {
+        ...baseRoom,
+        invite: inviteLink
+      }
       const matchRooms = saveMatchRoom(room)
       setAppState((state) => ({
         ...state,
@@ -2367,7 +2448,11 @@ export function useTifoController() {
         ...stateRef.current,
         matchRooms
       })
-      return room
+      return {
+        invite,
+        inviteLink,
+        room
+      }
     } catch (err) {
       setAppState((state) => ({
         ...state,
@@ -2436,10 +2521,25 @@ export function useTifoController() {
       const invite = parseInvite(value)
       const inviteLink = encodeInvite(invite)
       const room = inviteToRoom(invite, { profile: stateRef.current.profile })
-      rememberPrivateRoom({
-        ...invite,
-        invite: inviteLink
-      })
+      if (room.kind === 'match') {
+        const matchRooms = saveMatchRoom({
+          ...room,
+          invite: inviteLink
+        })
+        setAppState((state) => ({
+          ...state,
+          matchRooms
+        }))
+        syncWorkerMailbox({
+          ...stateRef.current,
+          matchRooms
+        })
+      } else {
+        rememberPrivateRoom({
+          ...invite,
+          invite: inviteLink
+        })
+      }
       joinRoom({ room })
     } catch (err) {
       setAppState((state) => ({
@@ -2460,7 +2560,7 @@ export function useTifoController() {
       return
     }
 
-    const targetRoom = room || null
+    const targetRoom = room?.kind === 'match' ? withMatchInvite(room) : room || null
     const targetRoomCode = targetRoom?.code || roomCode
     if (!targetRoomCode) return
     const publicRoom = stateRef.current.matchRooms.find((item) => item.code === targetRoomCode)
@@ -2468,6 +2568,17 @@ export function useTifoController() {
     const cachedEvents = loadCachedRoomEvents(targetRoomCode)
 
     if (targetRoom?.topicKey) rememberPrivateRoom(targetRoom, { touch: false })
+    if (targetRoom?.kind === 'match') {
+      const matchRooms = saveMatchRoom(targetRoom)
+      setAppState((state) => ({
+        ...state,
+        matchRooms
+      }))
+      syncWorkerMailbox({
+        ...stateRef.current,
+        matchRooms
+      })
+    }
     setRoomPending(targetRoomCode)
     clearClipPreviewUrls()
     clearChatMediaUrls()
@@ -2480,7 +2591,7 @@ export function useTifoController() {
       view: 'room',
       roomCode: targetRoomCode,
       roomAvatarDataUrl: targetRoom?.avatarDataUrl || publicRoom?.avatarDataUrl || '',
-      roomInvite: targetRoom?.invite || '',
+      roomInvite: targetRoom?.invite || publicRoom?.invite || '',
       roomKind: targetRoom?.kind || 'match',
       roomTitle,
       peerCount: 0,
@@ -2540,6 +2651,7 @@ export function useTifoController() {
       return
     }
     const replyTo = stateRef.current.chatReply
+    rememberPendingChatSend(roomCode, clean)
     setAppState((state) => ({
       ...state,
       chatDraft: '',

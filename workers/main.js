@@ -17,6 +17,7 @@ const { TifoIdentity } = require('./tifo-identity')
 const { createConversationState } = require('./tifo-conversations')
 const { createSyncDiagnostics } = require('./tifo-sync-diagnostics')
 const { transferSnapshot } = require('./tifo-attachments')
+const { cleanAvatarDataUrl } = require('./tifo-profile')
 
 const pipe = new FramedStream(Bare.IPC)
 
@@ -76,6 +77,7 @@ const mailbox = new TifoMailbox({
   dir: path.join(updaterConfig.dir, 'tifo-mailbox')
 })
 const conversations = createConversationState()
+const knownMatchRooms = new Map()
 const pendingChantRequests = new Map()
 const pendingChatMediaRequests = new Map()
 const pendingClipRequests = new Map()
@@ -85,7 +87,7 @@ const legacyEventLog = new TifoEventLog(store)
 const pendingSyncEventIds = new Set()
 const inflightSyncEventIds = new Set()
 const queuedRoomCommands = []
-const queuedRoomCommandTtlMs = 6000
+const queuedRoomCommandTtlMs = 30000
 const roomScopedCommandTypes = new Set([
   'chat:send',
   'chat:edit',
@@ -344,6 +346,7 @@ function handleAppConnection(connection, peerInfo) {
     protocol: appControlProtocol,
     onopen() {
       sendAppIdentity(peer)
+      sendAppRooms(peer)
       sendMailboxWant(peer)
     },
     onclose() {
@@ -399,6 +402,51 @@ function sendAppIdentity(peer) {
     type: 'app:identity',
     profile
   })
+}
+
+function rememberMatchRooms(rooms = []) {
+  let changed = false
+  for (const room of rooms) {
+    const clean = cleanMatchRoomAnnouncement(room)
+    if (!clean) continue
+    const existing = knownMatchRooms.get(clean.code)
+    const next = {
+      ...existing,
+      ...clean,
+      avatarDataUrl: clean.avatarDataUrl || existing?.avatarDataUrl || '',
+      invite: clean.invite || existing?.invite || '',
+      updatedAt: Math.max(existing?.updatedAt || 0, clean.updatedAt || 0)
+    }
+    if (JSON.stringify(existing || {}) === JSON.stringify(next)) continue
+    knownMatchRooms.set(next.code, next)
+    changed = true
+  }
+  return changed
+}
+
+function matchRoomAnnouncements() {
+  return Array.from(knownMatchRooms.values()).sort((left, right) => {
+    const timeDelta = (right.updatedAt || 0) - (left.updatedAt || 0)
+    if (timeDelta !== 0) return timeDelta
+    return left.title.localeCompare(right.title)
+  })
+}
+
+function sendAppRooms(peer) {
+  const rooms = matchRoomAnnouncements()
+  if (rooms.length === 0) return
+
+  sendAppPeer(peer, {
+    rooms,
+    type: 'app:rooms'
+  })
+}
+
+function broadcastAppRooms(exceptPeerId = null) {
+  for (const peer of appPeers.values()) {
+    if (peer.id === exceptPeerId) continue
+    sendAppRooms(peer)
+  }
 }
 
 function sendMailboxWant(peer) {
@@ -800,6 +848,7 @@ async function handleProfileSet(command) {
   sendKnownContacts('profile ready')
   sendAllPeerSnapshots()
   broadcastAppIdentity()
+  broadcastAppRooms()
   broadcastMailboxWant()
   sendSyncDiagnostics('profile ready')
 }
@@ -810,10 +859,17 @@ async function handleMailboxKnown(command) {
     await mailbox.setProfile(profile)
   }
   const rooms = Array.isArray(command.rooms) ? command.rooms : []
+  const roomAnnouncementsChanged = rememberMatchRooms(rooms)
   const topicHashes = await mailbox.setKnownRooms(rooms)
   await processKnownMailboxRecords(topicHashes).catch(() => {})
   sendKnownContacts('mailbox known')
   broadcastAppIdentity()
+  if (roomAnnouncementsChanged) {
+    send('rooms:discovered', {
+      rooms: matchRoomAnnouncements()
+    })
+    broadcastAppRooms()
+  }
   broadcastMailboxWant()
   sendSyncDiagnostics('mailbox known')
 }
@@ -875,6 +931,65 @@ function cleanCommandRoomCode(value) {
   return String(value || '')
     .trim()
     .toUpperCase()
+}
+
+function cleanMatchRoomAnnouncement(room) {
+  if (!room || typeof room !== 'object') return null
+  const code = cleanPublicRoomCode(room.code)
+  if (!code) return null
+
+  const homeName = cleanPublicRoomName(room.homeName || room.home)
+  const awayName = cleanPublicRoomName(room.awayName || room.away)
+  const title =
+    cleanPublicRoomTitle(room.title) ||
+    (homeName && awayName ? `${homeName} vs ${awayName}` : code.replace(/-/g, ' '))
+
+  const updatedAt = Number(room.updatedAt || room.createdAt)
+
+  return {
+    avatarDataUrl: cleanAvatarDataUrl(room.avatarDataUrl),
+    away: cleanPublicTeamCode(room.away || awayName),
+    awayName,
+    code,
+    home: cleanPublicTeamCode(room.home || homeName),
+    homeName,
+    invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
+    kind: 'match',
+    round: cleanPublicRoomTitle(room.round || room.region || room.detail) || 'Match room',
+    title,
+    updatedAt: Number.isFinite(updatedAt) ? Math.max(0, Math.round(updatedAt)) : 0
+  }
+}
+
+function cleanPublicRoomName(value) {
+  return cleanPublicRoomTitle(value).slice(0, 40)
+}
+
+function cleanPublicRoomTitle(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 72)
+}
+
+function cleanPublicTeamCode(value) {
+  const words = cleanPublicRoomTitle(value).split(/\s+/).filter(Boolean)
+  const raw =
+    words.length >= 2 ? words.map((word) => word.slice(0, 1)).join('') : words[0]?.slice(0, 3) || ''
+  return raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 4)
+}
+
+function cleanPublicRoomCode(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48)
 }
 
 function isRoomScopedCommand(command) {
@@ -2121,8 +2236,20 @@ async function handleAppPeerMessage(peer, message) {
     if (contact) {
       await mailbox.persist()
       sendKnownContacts('app peer identity')
+      sendAppRooms(peer)
       sendMailboxWant(peer)
       broadcastMailboxWant()
+    }
+    return
+  }
+
+  if (message.type === 'app:rooms') {
+    const rooms = Array.isArray(message.rooms) ? message.rooms : []
+    if (rememberMatchRooms(rooms)) {
+      send('rooms:discovered', {
+        rooms: matchRoomAnnouncements()
+      })
+      broadcastAppRooms(peer.id)
     }
     return
   }

@@ -88,6 +88,7 @@ export function MatchRoomView({ controller }) {
       <div className='col grow match-room-shell'>
         <MatchHeader
           match={match}
+          avatar={state.roomAvatarDataUrl || roomFixture?.avatarDataUrl || ''}
           matchTitle={matchTitle}
           onOpenInvite={() => setInviteOpen(true)}
         />
@@ -165,12 +166,18 @@ export function MatchRoomView({ controller }) {
   )
 }
 
-function MatchHeader({ match, matchTitle, onOpenInvite }) {
+function MatchHeader({ avatar, match, matchTitle, onOpenInvite }) {
   const subtitle = match.round || 'Live match terrace'
 
   return (
     <div className='content-header match-content-header'>
-      <BallAvatar size={38} />
+      {avatar ? (
+        <div className='conversation-avatar avatar'>
+          <img alt={matchTitle} src={avatar} />
+        </div>
+      ) : (
+        <BallAvatar size={38} />
+      )}
       <div className='conversation-title col'>
         <div className='row aic gap-2'>
           <span className='h-display'>{matchTitle}</span>

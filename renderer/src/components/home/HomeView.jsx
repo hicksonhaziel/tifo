@@ -21,6 +21,8 @@ export function HomeView({ actions, controller, state }) {
   const [groupName, setGroupName] = useState('')
   const [groupAvatarDataUrl, setGroupAvatarDataUrl] = useState('')
   const [groupAvatarError, setGroupAvatarError] = useState('')
+  const [roomAvatarDataUrl, setRoomAvatarDataUrl] = useState('')
+  const [roomAvatarError, setRoomAvatarError] = useState('')
   const [inviteLink, setInviteLink] = useState('')
   const [roomDraft, setRoomDraft] = useState({
     awayName: '',
@@ -84,11 +86,18 @@ export function HomeView({ actions, controller, state }) {
 
   function createMatchRoom(event) {
     event.preventDefault()
-    const room = activeActions.createMatchRoom(roomDraft)
-    if (!room) return
+    const result = activeActions.createMatchRoom({
+      ...roomDraft,
+      avatarDataUrl: roomAvatarDataUrl
+    })
+    if (!result) return
     setRoomDraft({ awayName: '', homeName: '', round: '' })
+    setRoomAvatarDataUrl('')
+    setRoomAvatarError('')
+    setCreatedInvite(result)
+    setCopyStatus('')
     setAddMenuOpen(false)
-    activeActions.joinRoom({ room })
+    activeActions.joinRoom({ room: result.room })
   }
 
   function setRoomDraftField(field, value) {
@@ -105,6 +114,16 @@ export function HomeView({ actions, controller, state }) {
       setGroupAvatarDataUrl(await profileAvatarFromFile(file))
     } catch (err) {
       setGroupAvatarError(err.message || 'Could not use group image')
+    }
+  }
+
+  async function uploadRoomAvatar(file) {
+    if (!file) return
+    try {
+      setRoomAvatarError('')
+      setRoomAvatarDataUrl(await profileAvatarFromFile(file))
+    } catch (err) {
+      setRoomAvatarError(err.message || 'Could not use room image')
     }
   }
 
@@ -153,6 +172,8 @@ export function HomeView({ actions, controller, state }) {
           }
           onRoomClick={joinRoom}
           query={query}
+          roomAvatarDataUrl={roomAvatarDataUrl}
+          roomAvatarError={roomAvatarError}
           roomDraft={roomDraft}
           rooms={rooms}
           setAddMenuOpen={setAddMenuOpen}
@@ -168,9 +189,11 @@ export function HomeView({ actions, controller, state }) {
           setGroupName={setGroupName}
           setInviteLink={setInviteLink}
           setQuery={setQuery}
+          setRoomAvatarDataUrl={setRoomAvatarDataUrl}
           setRoomDraftField={setRoomDraftField}
           state={activeState}
           uploadGroupAvatar={uploadGroupAvatar}
+          uploadRoomAvatar={uploadRoomAvatar}
         />
 
         <main className='main'>

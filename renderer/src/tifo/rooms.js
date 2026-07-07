@@ -2,113 +2,15 @@ import { cleanAvatarDataUrl } from './identity.js'
 
 export const MATCH_ROOMS_STORAGE_KEY = 'tifo:match-rooms:v1'
 
-const DEFAULT_MATCH_ROOMS = [
-  {
-    away: 'SEN',
-    awayAcc: '#7BC49A',
-    awayAccent: '#7BC49A',
-    awayName: 'Senegal',
-    code: 'MAR-SEN-QF',
-    detail: '218 fans',
-    fans: 218,
-    home: 'MAR',
-    homeAcc: '#B87A70',
-    homeAccent: '#B87A70',
-    homeName: 'Morocco',
-    live: true,
-    region: 'AFCON · Quarter-final',
-    round: 'AFCON · Quarter-final',
-    title: 'Morocco vs Senegal',
-    tone: 'ignite',
-    unread: 0
-  },
-  {
-    away: 'CIV',
-    awayAcc: '#D48F5A',
-    awayAccent: '#D48F5A',
-    awayName: "Côte d'Ivoire",
-    code: 'EGY-CIV-R16',
-    detail: '154 fans',
-    fans: 154,
-    home: 'EGY',
-    homeAcc: '#B87A70',
-    homeAccent: '#B87A70',
-    homeName: 'Egypt',
-    live: false,
-    region: 'AFCON · Round of 16',
-    round: 'AFCON · Round of 16',
-    title: "Egypt vs Côte d'Ivoire",
-    tone: 'warning',
-    unread: 0
-  },
-  {
-    away: 'BRA',
-    awayAcc: '#D4C25A',
-    awayAccent: '#D4C25A',
-    awayName: 'Brazil',
-    code: 'ARG-BRA-WCQ',
-    detail: '892 fans',
-    fans: 892,
-    home: 'ARG',
-    homeAcc: '#7FA6D1',
-    homeAccent: '#7FA6D1',
-    homeName: 'Argentina',
-    live: true,
-    region: 'CONMEBOL · WC Qualifier',
-    round: 'CONMEBOL · WC Qualifier',
-    title: 'Argentina vs Brazil',
-    tone: 'cold',
-    unread: 12
-  },
-  {
-    away: 'ARS',
-    awayAcc: '#B87A70',
-    awayAccent: '#B87A70',
-    awayName: 'Arsenal',
-    code: 'MCI-ARS-PL',
-    detail: '621 fans',
-    fans: 621,
-    home: 'MCI',
-    homeAcc: '#7FA6D1',
-    homeAccent: '#7FA6D1',
-    homeName: 'Man City',
-    live: false,
-    region: 'Premier League · MW 28',
-    round: 'Premier League · MW 28',
-    title: 'Man City vs Arsenal',
-    tone: 'cold',
-    unread: 0
-  },
-  {
-    away: 'BAR',
-    awayAcc: '#8B6F9E',
-    awayAccent: '#8B6F9E',
-    awayName: 'Barcelona',
-    code: 'RMA-BAR-EC',
-    detail: '1204 fans',
-    fans: 1204,
-    home: 'RMA',
-    homeAcc: '#C7C3BB',
-    homeAccent: '#C7C3BB',
-    homeName: 'Real Madrid',
-    live: false,
-    region: 'El Clásico · La Liga',
-    round: 'El Clásico · La Liga',
-    title: 'Real Madrid vs Barcelona',
-    tone: 'clean',
-    unread: 0
-  }
-]
-
 export function loadMatchRooms() {
   try {
     const raw = window.localStorage.getItem(MATCH_ROOMS_STORAGE_KEY)
-    if (!raw) return seedRooms()
+    if (!raw) return []
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return seedRooms()
+    if (!Array.isArray(parsed)) return []
     return parsed.map(cleanMatchRoom).filter(Boolean)
   } catch {
-    return seedRooms()
+    return []
   }
 }
 
@@ -164,18 +66,20 @@ export function saveMatchRoom(room) {
   return saveMatchRooms([clean, ...rooms.filter((item) => item.code !== clean.code)])
 }
 
+export function mergeMatchRooms(rooms = []) {
+  const incoming = rooms.map(cleanMatchRoom).filter(Boolean)
+  if (incoming.length === 0) return loadMatchRooms()
+  const current = loadMatchRooms()
+  return saveMatchRooms([
+    ...incoming,
+    ...current.filter((room) => !incoming.some((item) => item.code === room.code))
+  ])
+}
+
 export function deleteMatchRoom(roomCode) {
   const cleanCodeValue = cleanCode(roomCode)
   if (!cleanCodeValue) return loadMatchRooms()
   return saveMatchRooms(loadMatchRooms().filter((room) => room.code !== cleanCodeValue))
-}
-
-function seedRooms() {
-  return DEFAULT_MATCH_ROOMS.map((room) => ({
-    ...room,
-    kind: 'match',
-    userCreated: false
-  }))
 }
 
 function dedupeRooms(rooms) {
@@ -211,6 +115,7 @@ function cleanMatchRoom(room) {
     homeAcc: cleanColor(room.homeAcc || room.homeAccent) || '#6FA890',
     homeAccent: cleanColor(room.homeAccent || room.homeAcc) || '#6FA890',
     homeName,
+    invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
     kind: 'match',
     live: room.live === true,
     region: round,

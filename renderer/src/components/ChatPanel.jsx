@@ -39,6 +39,8 @@ import {
   WhistleGlyph
 } from './match/FlareGlyphs.jsx'
 
+const CHAT_TEXT_MAX_LENGTH = 1400
+
 export function ChatPanel({
   actions,
   allowFanDm = false,
@@ -253,7 +255,7 @@ export function ChatPanel({
                   <input
                     className='composer-input'
                     ref={chatInputRef}
-                    maxLength='180'
+                    maxLength={CHAT_TEXT_MAX_LENGTH}
                     placeholder={placeholder}
                     autoComplete='off'
                     value={state.chatDraft}
@@ -368,7 +370,7 @@ export function ChatPanel({
         <input
           id='chat-input'
           ref={chatInputRef}
-          maxLength='180'
+          maxLength={CHAT_TEXT_MAX_LENGTH}
           placeholder={placeholder}
           autoComplete='off'
           value={state.chatDraft}
@@ -1066,7 +1068,7 @@ function ChatMessageBody({
         <form className='chat-edit-form' onSubmit={onSaveEdit}>
           <input
             autoFocus
-            maxLength='180'
+            maxLength={CHAT_TEXT_MAX_LENGTH}
             value={editDraft}
             onChange={(changeEvent) => onEditDraftChange(changeEvent.currentTarget.value)}
           />
@@ -1089,7 +1091,7 @@ function ChatMessageBody({
       <>
         <ChatReplyPreview reply={event.payload.replyTo} />
         <p>
-          {event.payload.text}
+          <TifoLinkText actions={actions} text={event.payload.text} />
           {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
         </p>
       </>
@@ -1104,7 +1106,11 @@ function ChatMessageBody({
     return (
       <div className='chat-media-message image'>
         <ChatReplyPreview reply={payload.replyTo} />
-        {payload.caption ? <p>{payload.caption}</p> : null}
+        {payload.caption ? (
+          <p>
+            <TifoLinkText actions={actions} text={payload.caption} />
+          </p>
+        ) : null}
         {mediaUrl ? (
           <img src={mediaUrl} alt={payload.caption || 'Shared match photo'} />
         ) : (
@@ -1143,6 +1149,51 @@ function ChatMessageBody({
       )}
     </div>
   )
+}
+
+function TifoLinkText({ actions, text }) {
+  const raw = String(text || '')
+  const parts = splitTifoLinks(raw)
+  return parts.map((part, index) =>
+    part.type === 'link' ? (
+      <button
+        className='tifo-message-link'
+        key={`${part.value}-${index}`}
+        onClick={() => actions.joinInvite(part.value)}
+        type='button'
+      >
+        {part.value}
+      </button>
+    ) : (
+      <span key={`${part.value}-${index}`}>{part.value}</span>
+    )
+  )
+}
+
+function splitTifoLinks(text) {
+  const pattern = /tifo:\/\/room\/[A-Za-z0-9_-]+/g
+  const parts = []
+  let cursor = 0
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > cursor) {
+      parts.push({
+        type: 'text',
+        value: text.slice(cursor, match.index)
+      })
+    }
+    parts.push({
+      type: 'link',
+      value: match[0]
+    })
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) {
+    parts.push({
+      type: 'text',
+      value: text.slice(cursor)
+    })
+  }
+  return parts.length > 0 ? parts : [{ type: 'text', value: text }]
 }
 
 function VoiceNotePlayer({ durationMs, own, src }) {

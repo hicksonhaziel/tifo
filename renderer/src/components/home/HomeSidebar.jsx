@@ -36,6 +36,8 @@ export function HomeSidebar({
   onOpenCreated,
   onRoomClick,
   query,
+  roomAvatarDataUrl,
+  roomAvatarError,
   roomDraft,
   rooms,
   setAddMenuOpen,
@@ -45,10 +47,12 @@ export function HomeSidebar({
   setGroupAvatarDataUrl,
   setGroupName,
   setInviteLink,
+  setRoomAvatarDataUrl,
   setRoomDraftField,
   setQuery,
   state,
-  uploadGroupAvatar
+  uploadGroupAvatar,
+  uploadRoomAvatar
 }) {
   const profile = state.profile
   const username = usernameLabel(profile)
@@ -144,6 +148,8 @@ export function HomeSidebar({
                 onCreateRoom={onCreateRoom}
                 onJoinInvite={onJoinInvite}
                 onOpenCreated={onOpenCreated}
+                roomAvatarDataUrl={roomAvatarDataUrl}
+                roomAvatarError={roomAvatarError}
                 roomDraft={roomDraft}
                 setAddTab={setAddTab}
                 setCreatedInvite={setCreatedInvite}
@@ -151,8 +157,10 @@ export function HomeSidebar({
                 setGroupAvatarDataUrl={setGroupAvatarDataUrl}
                 setGroupName={setGroupName}
                 setInviteLink={setInviteLink}
+                setRoomAvatarDataUrl={setRoomAvatarDataUrl}
                 setRoomDraftField={setRoomDraftField}
                 uploadGroupAvatar={uploadGroupAvatar}
+                uploadRoomAvatar={uploadRoomAvatar}
               />
             </motion.div>
           ) : null}
@@ -198,8 +206,18 @@ function SidebarRoom({ active, onClick, onDelete, room }) {
       role='button'
       tabIndex={0}
     >
-      <div className='ico' style={{ background: 'transparent', border: 0 }}>
-        <BallAvatar size={44} />
+      <div
+        className='ico'
+        style={{
+          background: room.avatarDataUrl ? 'var(--bg-2)' : 'transparent',
+          border: room.avatarDataUrl ? '1px solid var(--line-2)' : 0
+        }}
+      >
+        {room.avatarDataUrl ? (
+          <img alt={roomTitle(room)} src={room.avatarDataUrl} />
+        ) : (
+          <BallAvatar size={44} />
+        )}
       </div>
       <div className='lbl'>
         <div className='t1'>{roomTitle(room)}</div>
@@ -293,6 +311,8 @@ function AddMenu({
   onCreateRoom,
   onJoinInvite,
   onOpenCreated,
+  roomAvatarDataUrl,
+  roomAvatarError,
   roomDraft,
   setAddTab,
   setCreatedInvite,
@@ -300,10 +320,12 @@ function AddMenu({
   setGroupAvatarDataUrl,
   setGroupName,
   setInviteLink,
+  setRoomAvatarDataUrl,
   setRoomDraftField,
-  uploadGroupAvatar
+  uploadGroupAvatar,
+  uploadRoomAvatar
 }) {
-  const inviteReady = createdInvite && ['create', 'dm'].includes(addTab)
+  const inviteReady = createdInvite && ['room', 'create', 'dm'].includes(addTab)
 
   return (
     <div
@@ -348,6 +370,14 @@ function AddMenu({
 
       {addTab === 'room' ? (
         <form className='col' onSubmit={onCreateRoom} style={{ gap: 10 }}>
+          <AvatarPicker
+            avatarDataUrl={roomAvatarDataUrl}
+            error={roomAvatarError}
+            onClear={() => setRoomAvatarDataUrl('')}
+            onUpload={uploadRoomAvatar}
+            note='Optional match image for the sidebar and invite.'
+            title='Room picture'
+          />
           <div className='form-grid-2'>
             <TextField
               onChange={(value) => setRoomDraftField('homeName', value)}
@@ -371,16 +401,27 @@ function AddMenu({
           >
             Create match room
           </MenuButton>
+          {inviteReady ? (
+            <CreatedInviteActions
+              copyInvite={copyInvite}
+              copyStatus={copyStatus}
+              inviteLink={createdInvite.inviteLink}
+              note='Share this room link with fans.'
+              onOpenCreated={onOpenCreated}
+            />
+          ) : null}
         </form>
       ) : null}
 
       {addTab === 'create' ? (
         <form className='col' onSubmit={onCreateGroup} style={{ gap: 10 }}>
-          <GroupAvatarPicker
+          <AvatarPicker
             avatarDataUrl={groupAvatarDataUrl}
             error={groupAvatarError}
             onClear={() => setGroupAvatarDataUrl('')}
             onUpload={uploadGroupAvatar}
+            note='Optional image for the sidebar and header.'
+            title='Group picture'
           />
           <TextField onChange={setGroupName} placeholder='Group name' value={groupName} />
           {!inviteReady ? (
@@ -459,7 +500,7 @@ function CreatedInviteActions({ copyInvite, copyStatus, inviteLink, note, onOpen
   )
 }
 
-function GroupAvatarPicker({ avatarDataUrl, error, onClear, onUpload }) {
+function AvatarPicker({ avatarDataUrl, error, note, onClear, onUpload, title }) {
   const inputRef = useRef(null)
   return (
     <div className='group-avatar-picker'>
@@ -475,8 +516,8 @@ function GroupAvatarPicker({ avatarDataUrl, error, onClear, onUpload }) {
         )}
       </button>
       <div className='grow col' style={{ gap: 2 }}>
-        <div className='group-avatar-title'>Group picture</div>
-        <div className='t-xs c-mute'>Optional image for the sidebar and header.</div>
+        <div className='group-avatar-title'>{title}</div>
+        <div className='t-xs c-mute'>{note}</div>
         {error ? <div className='t-xs avatar-error'>{error}</div> : null}
       </div>
       {avatarDataUrl ? (

@@ -654,6 +654,24 @@
   overflow-wrap: anywhere;
 }
 
+.tifo-generated-conversation .tifo-message-link {
+  display: inline;
+  padding: 0;
+  color: var(--acc-ink);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(111, 168, 144, 0.45);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tifo-generated-conversation .tifo-message-link:hover {
+  color: var(--ink-0);
+}
+
 .tifo-generated-conversation .generated-bubble .chat-media-message {
   margin-top: 0;
 }

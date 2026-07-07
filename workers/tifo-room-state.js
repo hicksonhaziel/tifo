@@ -18,6 +18,7 @@ function createTifoRoomState(options = {}) {
       reason: 'unsigned',
       verified: false
     }))
+  const maxChatTextLength = 1400
 
   if (typeof send !== 'function') {
     throw new TypeError('send function is required')
@@ -398,7 +399,7 @@ function createTifoRoomState(options = {}) {
     if (!text) return
 
     const payload = {
-      text: text.slice(0, 180)
+      text: cleanChatText(text)
     }
     const replyTo = replyToForCommand(command)
     if (replyTo) payload.replyTo = replyTo
@@ -426,7 +427,7 @@ function createTifoRoomState(options = {}) {
 
     addEvent('chat-edit', {
       targetId: targetId.slice(0, 96),
-      text: text.slice(0, 180)
+      text: cleanChatText(text)
     })
   }
 
@@ -627,7 +628,7 @@ function createTifoRoomState(options = {}) {
     if (event.type === 'chat') {
       if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
       const cleanPayload = {
-        text: payload.text.trim().slice(0, 180)
+        text: cleanChatText(payload.text)
       }
       const replyTo = sanitizeReplyTo(payload.replyTo)
       if (replyTo) cleanPayload.replyTo = replyTo
@@ -639,7 +640,7 @@ function createTifoRoomState(options = {}) {
       if (typeof payload.text !== 'string' || payload.text.trim() === '') return null
       return {
         targetId: payload.targetId.trim().slice(0, 96),
-        text: payload.text.trim().slice(0, 180)
+        text: cleanChatText(payload.text)
       }
     }
 
@@ -777,6 +778,12 @@ function createTifoRoomState(options = {}) {
       size: Math.round(size),
       title
     }
+  }
+
+  function cleanChatText(value) {
+    return String(value || '')
+      .trim()
+      .slice(0, maxChatTextLength)
   }
 
   function addRemoteEvent(event) {

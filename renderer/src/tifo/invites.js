@@ -41,6 +41,23 @@ export function createDmInvite(input = {}) {
   }
 }
 
+export function createMatchRoomInvite(room = {}, input = {}) {
+  return sanitizeInvite({
+    avatarDataUrl: room.avatarDataUrl,
+    away: room.away,
+    awayName: room.awayName,
+    code: room.code,
+    createdAt: room.createdAt,
+    creator: cleanProfile(input.profile),
+    home: room.home,
+    homeName: room.homeName,
+    kind: 'match',
+    round: room.round || room.region,
+    title: room.title,
+    version: 1
+  })
+}
+
 export async function createDmInviteForPeer(input = {}) {
   const profile = input.profile || {}
   const peer = input.peer || {}
@@ -70,11 +87,11 @@ export async function createDmInviteForPeer(input = {}) {
 }
 
 export function encodeInvite(invite) {
-  return `${INVITE_PREFIX}${base64UrlEncode(JSON.stringify(sanitizeInvite(invite)))}`
+  return `${INVITE_PREFIX}${base64UrlEncode(JSON.stringify(invitePayload(invite)))}`
 }
 
 export function parseInvite(value) {
-  const raw = String(value || '').trim()
+  const raw = normalizeInviteInput(value)
   if (!raw) throw new Error('Paste an invite link')
 
   const encoded = raw.startsWith(INVITE_PREFIX) ? raw.slice(INVITE_PREFIX.length) : raw
@@ -90,7 +107,7 @@ export function parseInvite(value) {
 
 export function inviteToRoom(invite, options = {}) {
   const clean = sanitizeInvite(invite)
-  return {
+  const room = {
     avatarDataUrl: clean.avatarDataUrl,
     code: clean.code,
     invite: encodeInvite(clean),
@@ -98,6 +115,22 @@ export function inviteToRoom(invite, options = {}) {
     title: clean.kind === 'dm' ? dmTitleForProfile(clean, options.profile) : clean.title,
     topicKey: clean.topicKey
   }
+
+  if (clean.kind === 'match') {
+    return {
+      ...room,
+      away: clean.away,
+      awayName: clean.awayName,
+      detail: clean.detail,
+      home: clean.home,
+      homeName: clean.homeName,
+      region: clean.region,
+      round: clean.round,
+      userCreated: false
+    }
+  }
+
+  return room
 }
 
 export function dmTitleForProfile(invite, profile = null) {
@@ -178,32 +211,72 @@ export function roomInviteLabel(room) {
 function sanitizeInvite(invite) {
   if (!invite || typeof invite !== 'object') throw new Error('Invite link is not valid')
 
-  const topicKey = typeof invite.topicKey === 'string' ? invite.topicKey.trim().toLowerCase() : ''
-  if (!/^[0-9a-f]{64}$/.test(topicKey)) throw new Error('Invite secret is not valid')
+  const kind =
+    invite.kind === 'match' || invite.kind === 'room'
+      ? 'match'
+      : invite.kind === 'dm'
+        ? 'dm'
+        : 'group'
 
-  const kind = invite.kind === 'dm' ? 'dm' : 'group'
-  const code = cleanCode(invite.code || `${kind === 'dm' ? 'DM' : 'GRP'}-${randomToken(10)}`)
+  const topicKey = typeof invite.topicKey === 'string' ? invite.topicKey.trim().toLowerCase() : ''
+  if (kind !== 'match' && !/^[0-9a-f]{64}$/.test(topicKey)) {
+    throw new Error('Invite secret is not valid')
+  }
+
+  const code = cleanCode(
+    invite.code || `${kind === 'dm' ? 'DM' : kind === 'group' ? 'GRP' : 'ROOM'}-${randomToken(10)}`
+  )
   const title =
     kind === 'dm'
       ? cleanDmTitle(invite.title, invite.peerHandle)
-      : cleanTitle(invite.title) || 'Private group'
+      : kind === 'match'
+        ? cleanMatchTitle(invite)
+        : cleanTitle(invite.title) || 'Private group'
 
-  return {
-    avatarDataUrl: kind === 'group' ? cleanAvatarDataUrl(invite.avatarDataUrl) : '',
+  const clean = {
+    avatarDataUrl:
+      kind === 'group' || kind === 'match' ? cleanAvatarDataUrl(invite.avatarDataUrl) : '',
     code,
     createdAt: Number.isFinite(invite.createdAt) ? invite.createdAt : Date.now(),
     creator: cleanProfile(invite.creator),
     kind,
     peerHandle: kind === 'dm' ? cleanHandle(invite.peerHandle) : '',
     title,
-    topicKey,
+    topicKey: kind === 'match' ? '' : topicKey,
     version: 1
   }
+
+  if (kind === 'match') {
+    clean.away = cleanTeamCode(invite.away || invite.awayName)
+    clean.awayName = cleanMatchName(invite.awayName || invite.away)
+    clean.home = cleanTeamCode(invite.home || invite.homeName)
+    clean.homeName = cleanMatchName(invite.homeName || invite.home)
+    clean.round = cleanTitle(invite.round || invite.region || invite.detail) || 'Match room'
+    clean.region = clean.round
+    clean.detail = clean.round
+  }
+
+  return clean
+}
+
+function invitePayload(invite) {
+  const clean = sanitizeInvite(invite)
+  const payload = { ...clean }
+  delete payload.avatarDataUrl
+  return payload
+}
+
+function normalizeInviteInput(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const match = raw.match(/tifo:\/\/room\/[A-Za-z0-9_-]+/)
+  return match ? match[0] : raw
 }
 
 function sanitizeRecentRoom(room, profile = null) {
   try {
     const invite = sanitizeInvite(room)
+    if (invite.kind === 'match') return null
     return {
       ...invite,
       invite: typeof room.invite === 'string' ? room.invite : encodeInvite(invite),
@@ -237,6 +310,27 @@ function cleanDmTitle(value, fallbackHandle = '') {
   return displayUsername(handle)
 }
 
+function cleanMatchTitle(invite) {
+  const homeName = cleanMatchName(invite.homeName || invite.home)
+  const awayName = cleanMatchName(invite.awayName || invite.away)
+  if (homeName && awayName) return `${homeName} vs ${awayName}`
+  return cleanTitle(invite.title) || 'Match room'
+}
+
+function cleanMatchName(value) {
+  return cleanTitle(value).slice(0, 40)
+}
+
+function cleanTeamCode(value) {
+  const words = cleanTitle(value).split(/\s+/).filter(Boolean)
+  const raw =
+    words.length >= 2 ? words.map((word) => word.slice(0, 1)).join('') : words[0]?.slice(0, 3) || ''
+  return raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 4)
+}
+
 function cleanHandle(value) {
   return String(value || '')
     .trim()
@@ -259,7 +353,7 @@ function cleanCode(value) {
     .replace(/[^A-Z0-9_-]/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, 32)
+    .slice(0, 48)
 }
 
 function cleanProfile(profile) {
