@@ -174,6 +174,10 @@ export function saveRecentPrivateRoom(room, profile = null) {
       ...room,
       invite:
         typeof room?.invite === 'string' && room.invite.trim() ? room.invite : existing?.invite,
+      avatarDataUrl:
+        typeof room?.avatarDataUrl === 'string' && room.avatarDataUrl.trim()
+          ? room.avatarDataUrl
+          : existing?.avatarDataUrl,
       lastJoinedAt: Number.isFinite(room?.lastJoinedAt)
         ? room.lastJoinedAt
         : existing?.lastJoinedAt || Date.now(),

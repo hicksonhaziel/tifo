@@ -1041,7 +1041,7 @@ export function useTifoController() {
         }
         break
       case 'mailbox:conversation':
-        if (message.room) rememberPrivateRoom(message.room)
+        if (message.room) rememberPrivateRoom(message.room, { touch: !!message.event })
         if (message.event) {
           const roomEvents = mergeRoomEvents(
             [message.event],
@@ -2427,7 +2427,13 @@ export function useTifoController() {
     )
     setAppState((state) => ({
       ...state,
-      recentPrivateRooms
+      recentPrivateRooms,
+      roomAvatarDataUrl:
+        state.roomCode === room?.code && room?.avatarDataUrl
+          ? room.avatarDataUrl
+          : state.roomAvatarDataUrl,
+      roomInvite: state.roomCode === room?.code && room?.invite ? room.invite : state.roomInvite,
+      roomTitle: state.roomCode === room?.code && room?.title ? room.title : state.roomTitle
     }))
     syncWorkerMailbox({
       ...stateRef.current,

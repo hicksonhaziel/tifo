@@ -239,7 +239,11 @@ function createTifoRoomState(options = {}) {
     if (!cleanTargetId) return null
 
     const target = state.events.find((event) => event.id === cleanTargetId)
-    if (!target || !['chat', 'chat-media'].includes(target.type)) return null
+    if (!target || !['chat', 'chat-media'].includes(target.type)) {
+      return command.replyTo && typeof command.replyTo === 'object'
+        ? sanitizeReplyTo(command.replyTo)
+        : null
+    }
 
     return replySnapshotForEvent(target)
   }

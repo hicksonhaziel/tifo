@@ -503,6 +503,7 @@ function sendPeerSnapshot(peer) {
     type: 'identity',
     nickname: roomState.state.profile.nickname || roomState.state.profile.displayName,
     profile: roomState.state.profile,
+    roomMetadata: roomMetadataForPeer(room),
     echo: echoTimeline.getIdentity()
   })
 }
@@ -1007,6 +1008,44 @@ function cleanPublicRoomCode(value) {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 48)
+}
+
+function roomMetadataForPeer(room) {
+  if (!room || room.kind !== 'group') return null
+  return {
+    avatarDataUrl: cleanAvatarDataUrl(room.avatarDataUrl),
+    code: room.code,
+    invite: typeof room.invite === 'string' ? room.invite.trim().slice(0, 1400) : '',
+    kind: room.kind,
+    title:
+      typeof room.title === 'string' ? room.title.trim().replace(/\s+/g, ' ').slice(0, 64) : '',
+    topicKey: typeof room.topicKey === 'string' ? room.topicKey.trim().toLowerCase() : ''
+  }
+}
+
+function roomMetadataFromPeer(currentRoom, metadata) {
+  if (!currentRoom || !metadata || typeof metadata !== 'object') return null
+  if (currentRoom.kind !== 'group') return null
+  if (metadata.kind !== currentRoom.kind) return null
+  if (metadata.code !== currentRoom.code) return null
+
+  const topicKey =
+    typeof metadata.topicKey === 'string' ? metadata.topicKey.trim().toLowerCase() : ''
+  if (currentRoom.topicKey && topicKey && topicKey !== currentRoom.topicKey) return null
+
+  return {
+    ...currentRoom,
+    avatarDataUrl: cleanAvatarDataUrl(metadata.avatarDataUrl) || currentRoom.avatarDataUrl || '',
+    invite:
+      typeof metadata.invite === 'string' && metadata.invite.trim()
+        ? metadata.invite.trim().slice(0, 1400)
+        : currentRoom.invite || '',
+    title:
+      typeof metadata.title === 'string' && metadata.title.trim()
+        ? metadata.title.trim().replace(/\s+/g, ' ').slice(0, 64)
+        : currentRoom.title,
+    topicKey: currentRoom.topicKey || topicKey
+  }
 }
 
 function profileSyncSignature(profile) {
@@ -2397,6 +2436,25 @@ async function handlePeerMessage(peer, message) {
 
     if (nickname.trim()) {
       peer.nickname = nickname.trim().slice(0, 24)
+    }
+
+    const peerRoom = roomMetadataFromPeer(room, message.roomMetadata)
+    if (peerRoom) {
+      const nextAvatar = peerRoom.avatarDataUrl || room.avatarDataUrl || ''
+      const nextInvite = peerRoom.invite || room.invite || ''
+      if (
+        nextAvatar !== (room.avatarDataUrl || '') ||
+        nextInvite !== (room.invite || '') ||
+        peerRoom.title !== room.title
+      ) {
+        roomState.state.room = {
+          ...room,
+          avatarDataUrl: nextAvatar,
+          invite: nextInvite,
+          title: peerRoom.title || room.title
+        }
+      }
+      announceMailboxConversation(roomState.state.room)
     }
 
     await handlePeerIdentity(peer, message.echo)

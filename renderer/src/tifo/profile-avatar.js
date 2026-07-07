@@ -1,6 +1,6 @@
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024
-const AVATAR_SIZE = 320
-const OUTPUT_QUALITY = 0.84
+const AVATAR_SIZE = 192
+const OUTPUT_QUALITY = 0.78
 
 export async function profileAvatarFromFile(file) {
   if (!file || typeof file !== 'object') throw new Error('Choose an image file')
