@@ -25,7 +25,7 @@ const languageNames = {
 const firefoxBergamotRecordsUrl =
   'https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/translations-models/records'
 const firefoxBergamotAttachmentBase = 'https://firefox-settings-attachments.cdn.mozilla.net'
-const preferredBergamotVersion = '1.0'
+const preferredBergamotVersions = ['1.0', '2.2', '2.1', '2.0']
 const minBergamotFileBytes = 1024
 
 function createQvacService({ sendToAll }) {
@@ -400,24 +400,31 @@ function selectBergamotRecords(records, names) {
     new Set([names.modelName, names.srcVocabName, names.dstVocabName])
   )
   const optionalNames = [names.lexName]
-  const selected = []
 
-  for (const name of requiredNames) {
-    const record = records.find(
-      (item) => bergamotRecordName(item) === name && item.version === preferredBergamotVersion
-    )
-    if (!record) return []
-    selected.push(record)
+  for (const version of preferredBergamotVersions) {
+    const selected = []
+    for (const name of requiredNames) {
+      const record = records.find(
+        (item) => bergamotRecordName(item) === name && item.version === version
+      )
+      if (!record) {
+        selected.length = 0
+        break
+      }
+      selected.push(record)
+    }
+    if (!selected.length) continue
+
+    for (const name of optionalNames) {
+      const record = records.find(
+        (item) => bergamotRecordName(item) === name && item.version === version
+      )
+      if (record) selected.push(record)
+    }
+    return selected
   }
 
-  for (const name of optionalNames) {
-    const record = records.find(
-      (item) => bergamotRecordName(item) === name && item.version === preferredBergamotVersion
-    )
-    if (record) selected.push(record)
-  }
-
-  return selected
+  return []
 }
 
 function bergamotRecordName(record) {
