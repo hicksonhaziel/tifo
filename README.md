@@ -132,7 +132,6 @@ Deeper dives live in [`/docs`](docs):
 - [`docs/pears.md`](docs/pears.md) — how TIFO uses Hyperswarm, Hypercore, Autobase & offline sync.
 - [`docs/qvac.md`](docs/qvac.md) — on-device translation, model download, offline behavior.
 - [`docs/running.md`](docs/running.md) — development, multi-peer demo, storage, packaging.
-- [`docs/demo.md`](docs/demo.md) — a tight live-demo script.
 
 ---
 
