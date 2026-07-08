@@ -42,10 +42,11 @@ export function BallAvatar({ size = 40, className = '', style }) {
             <stop offset='45%' stopColor='#ffffff' stopOpacity='0.08' />
             <stop offset='100%' stopColor='#000000' stopOpacity='0.24' />
           </radialGradient>
-          <radialGradient id={rimShadeId} cx='33%' cy='24%' r='70%'>
-            <stop offset='55%' stopColor='#000000' stopOpacity='0' />
-            <stop offset='82%' stopColor='#000000' stopOpacity='0.22' />
-            <stop offset='100%' stopColor='#000000' stopOpacity='0.46' />
+          <radialGradient id={rimShadeId} cx='33%' cy='24%' r='72%'>
+            <stop offset='48%' stopColor='#000000' stopOpacity='0' />
+            <stop offset='80%' stopColor='#000000' stopOpacity='0.26' />
+            <stop offset='92%' stopColor='#000000' stopOpacity='0.5' />
+            <stop offset='100%' stopColor='#000000' stopOpacity='0.68' />
           </radialGradient>
           <pattern id={leatherGrainId} height='5' patternUnits='userSpaceOnUse' width='5'>
             <circle cx='0.8' cy='1' fill='#ffffff' opacity='0.18' r='0.38' />
@@ -176,16 +177,25 @@ export function BallAvatar({ size = 40, className = '', style }) {
             cx='33'
             cy='22'
             fill='#fff'
-            opacity='0.28'
-            rx='17'
-            ry='9'
+            opacity='0.4'
+            rx='18'
+            ry='9.5'
             transform='rotate(-28 33 22)'
+          />
+          <ellipse
+            cx='30'
+            cy='19'
+            fill='#fff'
+            opacity='0.74'
+            rx='7.6'
+            ry='3.6'
+            transform='rotate(-28 30 19)'
           />
           <ellipse
             cx='25'
             cy='33'
             fill='#fff'
-            opacity='0.19'
+            opacity='0.24'
             rx='6'
             ry='2.6'
             transform='rotate(-34 25 33)'

@@ -795,3 +795,91 @@
   font-weight: 700;
   letter-spacing: 0;
 }
+
+/* Redesigned empty-state hero (faint art + concentric rings) */
+.tifo-generated-home .home-empty {
+  position: relative;
+}
+
+.tifo-generated-home .home-empty-art {
+  position: absolute;
+  top: 50%;
+  right: -80px;
+  width: clamp(420px, 46%, 620px);
+  height: auto;
+  transform: translateY(-50%);
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 1;
+  -webkit-mask-image: radial-gradient(75% 75% at 60% 50%, #000 40%, transparent 78%);
+  mask-image: radial-gradient(75% 75% at 60% 50%, #000 40%, transparent 78%);
+}
+
+.tifo-generated-home .home-empty-rings {
+  position: absolute;
+  top: 50%;
+  right: -10%;
+  width: 900px;
+  height: 900px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0 74px,
+    rgba(111, 168, 144, 0.05) 74px 75px
+  );
+  -webkit-mask-image: radial-gradient(circle at center, #000 30%, transparent 70%);
+  mask-image: radial-gradient(circle at center, #000 30%, transparent 70%);
+}
+
+.tifo-generated-home .home-empty-center {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 520px);
+  margin: 0 40px;
+  text-align: center;
+}
+
+.tifo-generated-home .home-empty-title {
+  margin: 0;
+  color: var(--ink-0);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 26px rgba(0, 0, 0, 0.7);
+}
+
+.tifo-generated-home .home-empty-sub {
+  margin: 12px auto 0;
+  max-width: 400px;
+  color: var(--ink-1);
+  font-size: 14px;
+  line-height: 1.55;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.6);
+}
+
+.tifo-generated-home .home-empty-sub b {
+  color: var(--acc-ink);
+  font-weight: 700;
+}
+
+.tifo-generated-home .home-empty-footer {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.tifo-generated-home .home-empty-footer svg {
+  color: var(--acc-ink);
+}

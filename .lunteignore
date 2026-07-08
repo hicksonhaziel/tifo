@@ -1,1 +1,4 @@
 renderer-dist/
+qvac/worker.bundle.js
+qvac/worker.entry.mjs
+qvac/addons.manifest.json

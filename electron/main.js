@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, Notification, nativeImage } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, Notification, nativeImage, shell } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -147,6 +147,21 @@ async function createWindow() {
   })
   win.setIcon(appIcon)
   win.setMenuBarVisibility(false)
+
+  // Open web links in the system browser; never spawn in-app windows.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url).catch(() => {})
+    }
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    const isDev = !!process.env.PEAR_DEV_SERVER_URL
+    if (isDev && url.startsWith(process.env.PEAR_DEV_SERVER_URL)) return
+    if (url.startsWith('file://')) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {})
+  })
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL
 

@@ -1,12 +1,13 @@
 import { motion } from 'framer-motion'
+import { Lock } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { unreadCountForRoom } from '../../tifo/notifications.js'
 import { profileAvatarFromFile } from '../../tifo/profile-avatar.js'
 import { RoomView } from '../RoomView.jsx'
-import { BallAvatar } from './BallAvatar.jsx'
 import { HomeSidebar } from './HomeSidebar.jsx'
 import chatBgSharp from './chat-bg-sharp.png'
+import p2pMesh from './p2p-mesh.png'
 import './generatedHome.css'
 import { recentChatRows, searchRooms } from './homeModel.js'
 
@@ -210,9 +211,23 @@ function GeneratedHomeEmpty() {
   return (
     <div className='chat-bg home-empty grow'>
       <div className='chat-bg-pattern' />
-      <div className='home-empty-state'>
-        <BallAvatar size={72} />
-        <div className='hint'>Pick a terrace from the sidebar</div>
+      <div className='home-empty-rings' aria-hidden='true' />
+      <img className='home-empty-art' src={p2pMesh} alt='' aria-hidden='true' />
+      <motion.div
+        className='home-empty-center'
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.2, 0.8, 0.3, 1] }}
+      >
+        <h1 className='home-empty-title'>Welcome to the terrace</h1>
+        <p className='home-empty-sub'>
+          Pick a room from the sidebar to start — or use the <b>+</b> to join, create a group, or
+          start a DM.
+        </p>
+      </motion.div>
+      <div className='home-empty-footer'>
+        <Lock size={12} strokeWidth={2.4} />
+        Local-first · peer-to-peer · no servers
       </div>
     </div>
   )

@@ -2,3 +2,6 @@ out
 renderer-dist
 PLAN.md
 BUILD.md
+qvac/worker.bundle.js
+qvac/worker.entry.mjs
+qvac/addons.manifest.json

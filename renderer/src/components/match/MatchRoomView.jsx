@@ -30,7 +30,7 @@ import { profileLabel, profileName } from '../../tifo/identity.js'
 import { ChatPanel } from '../ChatPanel.jsx'
 import { InviteModal } from '../conversation/InviteModal.jsx'
 import { ReactionEffects } from '../ReactionEffects.jsx'
-import { ReplayPreview } from '../ReplayPreview.jsx'
+import { ReplayModal } from './ReplayModal.jsx'
 import '../conversation/generatedConversation.css'
 import { profileAvatarView } from '../../tifo/profile-avatar.js'
 import { BallAvatar } from '../home/BallAvatar.jsx'
@@ -160,6 +160,11 @@ export function MatchRoomView({ controller }) {
               onClose={() => setInviteOpen(false)}
               title={matchTitle}
             />
+          ) : null}
+        </AnimatePresence>
+        <AnimatePresence>
+          {state.replayPreview.active ? (
+            <ReplayModal actions={actions} replay={state.replayPreview} />
           ) : null}
         </AnimatePresence>
       </div>
@@ -375,6 +380,7 @@ function FansTab({ actions, fans, state }) {
 function ReplayTab({ actions, events, replay }) {
   const anchorEvents = events.slice(0, 8)
   const hasEvents = anchorEvents.length > 0
+  const playing = replay.active
 
   return (
     <div className='match-replay-tab'>
@@ -383,7 +389,8 @@ function ReplayTab({ actions, events, replay }) {
           <span className='eyebrow'>Replay Echo</span>
           <strong>Relive the terrace moment</strong>
           <p>
-            Replays the chants, flares and clips around a selected timeline moment in match order.
+            Replays the chants, flares and clips around a selected moment — in match order, in a
+            full-screen theater view.
           </p>
         </div>
         <button
@@ -393,12 +400,22 @@ function ReplayTab({ actions, events, replay }) {
           type='button'
         >
           <Play size={13} fill='currentColor' strokeWidth={2.4} />
-          {replay.active ? 'Restart Echo' : 'Replay latest Echo'}
+          {playing ? 'Restart Echo' : 'Replay latest Echo'}
         </button>
       </section>
 
-      {replay.active ? (
-        <ReplayPreview actions={actions} replay={replay} />
+      {playing ? (
+        <div className='match-replay-playing'>
+          <span className='replay-live-dot' aria-hidden='true' />
+          <span>Echo playing in theater view</span>
+          <button
+            className='btn ghost sm'
+            onClick={() => actions.resetReplayPreview({ renderAfter: true })}
+            type='button'
+          >
+            Stop
+          </button>
+        </div>
       ) : (
         <div className='match-replay-empty'>
           <Sparkles size={16} strokeWidth={2.4} />

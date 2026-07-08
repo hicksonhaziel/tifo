@@ -678,3 +678,448 @@
     width: fit-content;
   }
 }
+
+/* ═══════════════════════════════ REPLAY THEATER MODAL */
+.tifo-generated-match .match-replay-playing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(111, 168, 144, 0.28);
+  border-radius: 10px;
+  background: var(--acc-wash);
+  color: var(--ink-0);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tifo-generated-match .match-replay-playing .btn {
+  margin-left: auto;
+}
+
+.replay-live-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-wash);
+  animation: tifo-replay-dot 1.5s ease-in-out infinite;
+}
+
+.replay-live-dot.done {
+  background: var(--live);
+  animation: none;
+}
+
+@keyframes tifo-replay-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.35);
+  }
+}
+
+.tifo-generated-match .replay-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.tifo-generated-match .replay-modal {
+  position: relative;
+  width: min(860px, 96vw);
+  max-height: min(90vh, 880px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 24px;
+  background:
+    radial-gradient(130% 80% at 50% -12%, rgba(111, 168, 144, 0.16), transparent 62%), var(--bg-1);
+  box-shadow:
+    0 60px 140px -28px rgba(0, 0, 0, 0.82),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.tifo-generated-match .replay-modal.running {
+  border-color: rgba(111, 168, 144, 0.32);
+}
+
+.tifo-generated-match .replay-modal-aura {
+  position: absolute;
+  top: -170px;
+  left: 50%;
+  width: 540px;
+  height: 540px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0 46px,
+    rgba(111, 168, 144, 0.06) 46px 47px
+  );
+  -webkit-mask-image: radial-gradient(circle at center, #000 18%, transparent 66%);
+  mask-image: radial-gradient(circle at center, #000 18%, transparent 66%);
+}
+
+.tifo-generated-match .replay-modal > *:not(.replay-modal-aura) {
+  position: relative;
+  z-index: 1;
+}
+
+.tifo-generated-match .replay-modal-stage {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: center;
+  gap: 26px;
+  padding: 34px 32px 8px;
+}
+
+.tifo-generated-match .replay-echo-rings {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tifo-generated-match .replay-echo-rings .ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 1px solid rgba(111, 168, 144, 0.4);
+  opacity: 0;
+  animation: tifo-echo-ripple 2.8s ease-out infinite;
+}
+
+.tifo-generated-match .replay-echo-rings .r2 {
+  animation-delay: 0.9s;
+}
+
+.tifo-generated-match .replay-echo-rings .r3 {
+  animation-delay: 1.8s;
+}
+
+.tifo-generated-match .replay-echo-rings.done .ring {
+  animation: none;
+  opacity: 0.4;
+}
+
+@keyframes tifo-echo-ripple {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+.tifo-generated-match .replay-echo-core {
+  position: relative;
+  z-index: 1;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(111, 168, 144, 0.35);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(111, 168, 144, 0.22), transparent 60%), var(--bg-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.tifo-generated-match .replay-echo-core em {
+  color: var(--ink-0);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  font-style: normal;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tifo-generated-match .replay-echo-core small {
+  margin-top: 2px;
+  color: var(--acc-ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.tifo-generated-match .replay-stage-copy {
+  min-width: 0;
+}
+
+.tifo-generated-match .replay-stage-copy .status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tifo-generated-match .replay-stage-copy strong {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink-0);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+}
+
+.tifo-generated-match .replay-stage-copy p {
+  margin: 8px 0 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.tifo-generated-match .replay-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.tifo-generated-match .replay-modal-close:hover {
+  background: var(--bg-3);
+  color: var(--ink-0);
+}
+
+.tifo-generated-match .replay-modal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.tifo-generated-match .replay-modal-meta span {
+  padding: 3px 9px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.tifo-generated-match .replay-modal-progress {
+  height: 6px;
+  margin: 20px 32px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-3);
+}
+
+.tifo-generated-match .replay-modal-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--acc-soft), var(--acc));
+  transition: width 0.2s ease;
+}
+
+.tifo-generated-match .replay-modal-cues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 14px 32px 0;
+}
+
+.tifo-generated-match .replay-modal-cues span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+
+.tifo-generated-match .replay-modal-cues span.tone-ignite,
+.tifo-generated-match .replay-modal-cues span.tone-danger {
+  background: #e53935;
+}
+
+.tifo-generated-match .replay-modal-cues span.tone-warning {
+  background: var(--amber);
+}
+
+.tifo-generated-match .replay-modal-cues span.tone-clean {
+  background: var(--live);
+}
+
+.tifo-generated-match .replay-modal-cues span.tone-cold {
+  background: #75bfff;
+}
+
+.tifo-generated-match .replay-modal-cues span.active {
+  transform: scale(1.5);
+  box-shadow: 0 0 0 4px var(--acc-wash);
+}
+
+.tifo-generated-match .replay-modal-feed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 18px 20px 2px 32px;
+  padding: 2px 12px 2px 0;
+  overflow-y: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.tifo-generated-match .replay-modal-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.tifo-generated-match .replay-modal-empty svg {
+  color: var(--acc-ink);
+}
+
+.tifo-generated-match .replay-modal-msg {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-1);
+  border-left: 2px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--bg-2);
+  transition:
+    border-color 0.18s,
+    background 0.18s;
+}
+
+.tifo-generated-match .replay-modal-msg.active {
+  border-color: rgba(111, 168, 144, 0.4);
+  border-left-color: var(--acc);
+  background: var(--bg-3);
+}
+
+.tifo-generated-match .replay-modal-msg.tone-ignite,
+.tifo-generated-match .replay-modal-msg.tone-danger {
+  border-left-color: #e53935;
+}
+
+.tifo-generated-match .replay-modal-msg.tone-warning {
+  border-left-color: var(--amber);
+}
+
+.tifo-generated-match .replay-modal-msg.tone-clean {
+  border-left-color: var(--live);
+}
+
+.tifo-generated-match .replay-modal-msg .off {
+  color: var(--acc-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tifo-generated-match .replay-modal-msg .body strong {
+  color: var(--ink-0);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.tifo-generated-match .replay-modal-msg .body p {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tifo-generated-match .replay-modal-error {
+  margin: 12px 32px 0;
+  color: #f3aaa5;
+  font-size: 12px;
+}
+
+.tifo-generated-match .replay-modal-controls {
+  display: flex;
+  gap: 10px;
+  padding: 18px 32px 24px;
+  margin-top: 8px;
+}
+
+.tifo-generated-match .replay-modal-controls .btn {
+  flex: 1;
+}
+
+@media (max-width: 620px) {
+  .tifo-generated-match .replay-modal-stage {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    gap: 16px;
+    padding: 34px 22px 4px;
+  }
+
+  .tifo-generated-match .replay-stage-copy .status-label,
+  .tifo-generated-match .replay-modal-meta {
+    justify-content: center;
+  }
+
+  .tifo-generated-match .replay-stage-copy strong {
+    font-size: 24px;
+  }
+
+  .tifo-generated-match .replay-modal-progress,
+  .tifo-generated-match .replay-modal-cues,
+  .tifo-generated-match .replay-modal-error,
+  .tifo-generated-match .replay-modal-controls {
+    margin-inline: 22px;
+    padding-inline: 22px;
+  }
+
+  .tifo-generated-match .replay-modal-feed {
+    margin-inline: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replay-live-dot,
+  .tifo-generated-match .replay-echo-rings .ring {
+    animation: none;
+  }
+}

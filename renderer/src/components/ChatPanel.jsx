@@ -1345,47 +1345,73 @@ function QvacTranslationBlock({
 
 function TifoLinkText({ actions, text }) {
   const raw = String(text || '')
-  const parts = splitTifoLinks(raw)
-  return parts.map((part, index) =>
-    part.type === 'link' ? (
-      <button
-        className='tifo-message-link'
-        key={`${part.value}-${index}`}
-        onClick={() => actions.joinInvite(part.value)}
-        type='button'
-      >
-        {part.value}
-      </button>
-    ) : (
-      <span key={`${part.value}-${index}`}>{part.value}</span>
-    )
-  )
+  const parts = splitMessageLinks(raw)
+  return parts.map((part, index) => {
+    if (part.type === 'tifo') {
+      return (
+        <button
+          className='tifo-message-link'
+          key={`${part.value}-${index}`}
+          onClick={() => actions.joinInvite(part.value)}
+          type='button'
+        >
+          <Link2 size={12} strokeWidth={2.6} />
+          {prettyTifoLabel(part.value)}
+        </button>
+      )
+    }
+    if (part.type === 'url') {
+      return (
+        <a
+          className='tifo-ext-link'
+          href={part.value}
+          key={`${part.value}-${index}`}
+          rel='noopener noreferrer'
+          target='_blank'
+          title={part.value}
+        >
+          {prettyUrlLabel(part.value)}
+        </a>
+      )
+    }
+    return <span key={`${part.value}-${index}`}>{part.value}</span>
+  })
 }
 
-function splitTifoLinks(text) {
-  const pattern = /tifo:\/\/room\/[A-Za-z0-9_-]+/g
+function splitMessageLinks(text) {
+  const pattern = /(tifo:\/\/room\/[A-Za-z0-9_-]+)|(https?:\/\/[^\s<]+[^\s<.,!?;:)"'\]}])/g
   const parts = []
   let cursor = 0
   for (const match of text.matchAll(pattern)) {
     if (match.index > cursor) {
-      parts.push({
-        type: 'text',
-        value: text.slice(cursor, match.index)
-      })
+      parts.push({ type: 'text', value: text.slice(cursor, match.index) })
     }
-    parts.push({
-      type: 'link',
-      value: match[0]
-    })
+    if (match[1]) {
+      parts.push({ type: 'tifo', value: match[1] })
+    } else {
+      parts.push({ type: 'url', value: match[2] })
+    }
     cursor = match.index + match[0].length
   }
   if (cursor < text.length) {
-    parts.push({
-      type: 'text',
-      value: text.slice(cursor)
-    })
+    parts.push({ type: 'text', value: text.slice(cursor) })
   }
   return parts.length > 0 ? parts : [{ type: 'text', value: text }]
+}
+
+function prettyTifoLabel(value) {
+  const code = String(value).replace(/^tifo:\/\/room\//i, '')
+  const short = code.length > 14 ? `${code.slice(0, 13)}…` : code
+  return `Join room · ${short}`
+}
+
+function prettyUrlLabel(url) {
+  let label = String(url)
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/$/, '')
+  if (label.length > 36) label = `${label.slice(0, 35)}…`
+  return label
 }
 
 function VoiceNotePlayer({ durationMs, own, src }) {

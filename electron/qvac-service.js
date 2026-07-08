@@ -442,7 +442,7 @@ async function downloadBergamotRecord(record, dir) {
   if (await isUsableFile(dest, expectedSize)) return
 
   const url = `${firefoxBergamotAttachmentBase}/${record.attachment.location}`
-  const response = await fetch(url, { redirect: 'follow' })
+  const response = await fetchWithRetry(url, { redirect: 'follow' })
   if (!response.ok) throw new Error(`HTTP ${response.status} downloading ${filename}`)
 
   const buffer = Buffer.from(await response.arrayBuffer())
@@ -469,12 +469,37 @@ async function isUsableFile(filePath, expectedSize = 0) {
   }
 }
 
-async function fetchJson(url) {
+async function fetchWithRetry(url, options = {}, { attempts = 3, timeoutMs = 25000 } = {}) {
   if (typeof fetch !== 'function') {
-    throw new Error('QVAC model download requires fetch support in Electron main')
+    throw new Error('Local translation needs network support that is unavailable here')
   }
 
-  const response = await fetch(url)
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal })
+      clearTimeout(timer)
+      return response
+    } catch (err) {
+      clearTimeout(timer)
+      lastError = err
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 600 * attempt))
+      }
+    }
+  }
+
+  const reason = lastError?.name === 'AbortError' ? 'timed out' : 'failed'
+  throw new Error(
+    `Could not reach the translation model service (request ${reason}). ` +
+      'Connect to the internet once to download the model, then it works offline.'
+  )
+}
+
+async function fetchJson(url) {
+  const response = await fetchWithRetry(url)
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching QVAC model records`)
   return response.json()
 }
