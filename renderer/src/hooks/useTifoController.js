@@ -84,10 +84,42 @@ import { formatReplayOffset } from '../tifo/format.js'
 import { mergeKnownProfiles, profilesFromEvents, workerProfileSignature } from '../tifo/profiles.js'
 import { knownMailboxRooms, mailboxSyncSignature } from '../tifo/worker-mailbox-sync.js'
 
+const qvacTargetLanguageKey = 'tifo:qvac-target-language:v1'
+
 function cleanRoomCode(value) {
   return String(value || '')
     .trim()
     .toUpperCase()
+}
+
+function loadQvacTargetLanguage() {
+  try {
+    const value = window.localStorage.getItem(qvacTargetLanguageKey)
+    return cleanQvacLanguage(value) || 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+function saveQvacTargetLanguage(language) {
+  try {
+    window.localStorage.setItem(qvacTargetLanguageKey, language)
+  } catch {}
+}
+
+function cleanQvacLanguage(value) {
+  const language = String(value || '')
+    .trim()
+    .toLowerCase()
+  return /^[a-z]{2}$/.test(language) ? language : ''
+}
+
+function qvacTextForEvent(event) {
+  if (event?.type === 'chat') return String(event.payload?.text || '').trim()
+  if (event?.type === 'chat-media' && event.payload?.kind === 'image') {
+    return String(event.payload?.caption || '').trim()
+  }
+  return ''
 }
 
 export function useTifoController() {
@@ -104,6 +136,10 @@ export function useTifoController() {
       notifications: {
         ...initialState.notifications,
         readAtByRoom: loadNotificationReadAt()
+      },
+      qvac: {
+        ...initialState.qvac,
+        targetLanguage: loadQvacTargetLanguage()
       }
     }
   })
@@ -2557,6 +2593,124 @@ export function useTifoController() {
     })
   }
 
+  function setQvacStatus(patch) {
+    setAppState((state) => ({
+      ...state,
+      qvac: {
+        ...state.qvac,
+        ...patch
+      }
+    }))
+  }
+
+  function setQvacTranslation(eventId, patch) {
+    if (!eventId) return
+    setAppState((state) => ({
+      ...state,
+      qvac: {
+        ...state.qvac,
+        translations: {
+          ...state.qvac.translations,
+          [eventId]: {
+            ...(state.qvac.translations[eventId] || {}),
+            ...patch,
+            updatedAt: Date.now()
+          }
+        }
+      }
+    }))
+  }
+
+  async function refreshQvacStatus() {
+    if (!window.bridge?.qvacStatus) return
+    try {
+      const status = await window.bridge.qvacStatus()
+      if (!mountedRef.current) return
+      setQvacStatus({
+        available: status?.available === true,
+        languages: Array.isArray(status?.languages) ? status.languages : [],
+        status: status?.available === true ? 'ready' : 'unavailable'
+      })
+    } catch (err) {
+      if (!mountedRef.current) return
+      setQvacStatus({
+        available: false,
+        error: err.message || 'QVAC is not available',
+        status: 'error'
+      })
+    }
+  }
+
+  function setQvacTargetLanguage(language) {
+    const clean = cleanQvacLanguage(language) || 'en'
+    saveQvacTargetLanguage(clean)
+    setQvacStatus({ targetLanguage: clean })
+  }
+
+  async function translateChatEvent(event) {
+    if (!event?.id) return
+    if (!window.bridge?.qvacTranslateText) {
+      setQvacTranslation(event.id, {
+        error: 'QVAC bridge is not available',
+        status: 'error'
+      })
+      return
+    }
+
+    const targetLanguage = stateRef.current.qvac?.targetLanguage || 'en'
+    const sourceText = qvacTextForEvent(event)
+    if (!sourceText) {
+      setQvacTranslation(event.id, {
+        error: 'This message has no text to translate',
+        status: 'error'
+      })
+      return
+    }
+
+    setQvacTranslation(event.id, {
+      error: '',
+      kind: 'text',
+      status: 'loading',
+      targetLanguage
+    })
+    setQvacStatus({
+      error: '',
+      status: 'loading'
+    })
+
+    try {
+      const result = await window.bridge.qvacTranslateText({
+        text: sourceText,
+        to: targetLanguage
+      })
+
+      if (!mountedRef.current) return
+      setQvacTranslation(event.id, {
+        engine: result.engine || 'qvac',
+        error: '',
+        sourceLanguage: result.sourceLanguage || '',
+        status: 'ready',
+        targetLanguage: result.targetLanguage || targetLanguage,
+        text: result.text || sourceText
+      })
+      setQvacStatus({
+        error: '',
+        status: 'ready'
+      })
+    } catch (err) {
+      if (!mountedRef.current) return
+      setQvacTranslation(event.id, {
+        error: err.message || 'QVAC translation failed',
+        status: 'error',
+        targetLanguage
+      })
+      setQvacStatus({
+        error: err.message || 'QVAC translation failed',
+        status: 'error'
+      })
+    }
+  }
+
   function setChatDraft(value) {
     setAppState((state) => ({
       ...state,
@@ -2636,10 +2790,19 @@ export function useTifoController() {
     })
     workerClientRef.current = client
     const cleanupWorker = client.start()
+    const cleanupQvacProgress = window.bridge?.onQvacProgress?.((progress) => {
+      if (!mountedRef.current) return
+      setQvacStatus({
+        lastProgress: progress?.message || '',
+        status: progress?.phase === 'ready' ? 'ready' : 'loading'
+      })
+    })
+    refreshQvacStatus()
 
     return () => {
       mountedRef.current = false
       cleanupWorker?.()
+      cleanupQvacProgress?.()
       resetChantTimers()
       resetVoiceTimers()
       releaseChantStream()
@@ -2711,10 +2874,12 @@ export function useTifoController() {
       sendReaction,
       setChatDraft,
       setClipCaption,
+      setQvacTargetLanguage,
       setOffline,
       startChatReply,
       startChantRecording,
       startVoiceNoteRecording,
+      translateChatEvent,
       stopChantRecording,
       stopVoiceNoteRecording
     },

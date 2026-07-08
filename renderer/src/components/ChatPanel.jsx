@@ -2,6 +2,7 @@ import {
   Check,
   FileText,
   ImagePlus,
+  Languages,
   Link2,
   MessageCircle,
   Mic,
@@ -213,6 +214,7 @@ export function ChatPanel({
                 reply={state.chatReply}
               />
             ) : null}
+            <QvacControl actions={actions} qvac={state.qvac} />
             {matchComposer && !quickChantsHidden && !trayOpen && !voiceRecording ? (
               <QuickChants
                 onDismiss={() => setQuickChantsHidden(true)}
@@ -341,6 +343,7 @@ export function ChatPanel({
           {offlineActive ? 'Offline' : connected ? 'Live sync' : 'Local first'}
         </span>
       </div>
+      <QvacControl actions={actions} qvac={state.qvac} />
       <div className='chat-list' id='chat-list'>
         <ChatItems
           actions={actions}
@@ -863,6 +866,7 @@ function ChatItems({
           onCancelEdit={onCancelEdit}
           onEditDraftChange={onEditDraftChange}
           onSaveEdit={onSaveEdit}
+          state={state}
         />
         <ChatReactionBar
           actions={actions}
@@ -999,6 +1003,7 @@ function GeneratedChatItem({
             onCancelEdit={onCancelEdit}
             onEditDraftChange={onEditDraftChange}
             onSaveEdit={onSaveEdit}
+            state={state}
           />
         </div>
 
@@ -1060,8 +1065,11 @@ function ChatMessageBody({
   event,
   onCancelEdit,
   onEditDraftChange,
-  onSaveEdit
+  onSaveEdit,
+  state
 }) {
+  const translation = state.qvac?.translations?.[event.id] || null
+
   if (event.type === 'chat') {
     if (editing) {
       return (
@@ -1094,6 +1102,12 @@ function ChatMessageBody({
           <TifoLinkText actions={actions} text={event.payload.text} />
           {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
         </p>
+        <QvacTranslationBlock
+          actions={actions}
+          event={event}
+          qvac={state.qvac}
+          translation={translation}
+        />
       </>
     )
   }
@@ -1124,6 +1138,14 @@ function ChatMessageBody({
           </button>
         )}
         <small>{formatBytes(payload.size)}</small>
+        {payload.caption ? (
+          <QvacTranslationBlock
+            actions={actions}
+            event={event}
+            qvac={state.qvac}
+            translation={translation}
+          />
+        ) : null}
       </div>
     )
   }
@@ -1147,6 +1169,81 @@ function ChatMessageBody({
           {isLoading ? 'Preparing voice note' : 'Load voice note'}
         </button>
       )}
+    </div>
+  )
+}
+
+function QvacControl({ actions, qvac = {} }) {
+  const languages = qvac.languages?.length
+    ? qvac.languages
+    : [
+        { code: 'en', label: 'English' },
+        { code: 'fr', label: 'French' },
+        { code: 'es', label: 'Spanish' },
+        { code: 'ar', label: 'Arabic' },
+        { code: 'pt', label: 'Portuguese' }
+      ]
+  const statusLabel =
+    qvac.status === 'loading'
+      ? qvac.lastProgress || 'QVAC loading'
+      : qvac.available
+        ? 'Local AI translation'
+        : 'QVAC unavailable'
+
+  return (
+    <div className='qvac-control' aria-label='QVAC translation controls'>
+      <Languages size={14} strokeWidth={2.4} />
+      <span>{statusLabel}</span>
+      <select
+        aria-label='Translation target language'
+        value={qvac.targetLanguage || 'en'}
+        onChange={(event) => actions.setQvacTargetLanguage(event.currentTarget.value)}
+      >
+        {languages.map((language) => (
+          <option key={language.code} value={language.code}>
+            {language.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function QvacTranslationBlock({
+  actions,
+  disabled = false,
+  disabledReason = '',
+  event,
+  qvac = {},
+  translation
+}) {
+  const loading = translation?.status === 'loading'
+  const label = loading
+    ? 'Translating'
+    : translation?.status === 'ready'
+      ? `Translated to ${(translation.targetLanguage || qvac.targetLanguage || 'en').toUpperCase()}`
+      : `Translate to ${(qvac.targetLanguage || 'en').toUpperCase()}`
+
+  return (
+    <div className='qvac-translation'>
+      <button
+        className='qvac-translate-button'
+        disabled={loading || disabled}
+        onClick={() => actions.translateChatEvent(event)}
+        title={disabled ? disabledReason : label}
+        type='button'
+      >
+        <Languages size={13} strokeWidth={2.4} />
+        {disabled ? disabledReason : label}
+      </button>
+      {translation?.status === 'ready' ? (
+        <div className='qvac-translation-result'>
+          <p>{translation.text}</p>
+        </div>
+      ) : null}
+      {translation?.status === 'error' ? (
+        <small className='qvac-translation-error'>{translation.error}</small>
+      ) : null}
     </div>
   )
 }

@@ -654,6 +654,103 @@
   overflow-wrap: anywhere;
 }
 
+.tifo-generated-conversation .qvac-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 30px;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tifo-generated-conversation .composer .qvac-control {
+  margin: 0;
+}
+
+.tifo-generated-conversation .qvac-control svg {
+  color: var(--acc-ink);
+  flex-shrink: 0;
+}
+
+.tifo-generated-conversation .qvac-control span {
+  overflow: hidden;
+  max-width: 210px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tifo-generated-conversation .qvac-control select {
+  min-height: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--ink-0);
+  font: inherit;
+  padding: 0 22px 0 8px;
+}
+
+.tifo-generated-conversation .qvac-translation {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tifo-generated-conversation .qvac-translate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid rgba(111, 168, 144, 0.28);
+  border-radius: 999px;
+  background: var(--acc-wash);
+  color: var(--acc-ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tifo-generated-conversation .qvac-translate-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.tifo-generated-conversation .qvac-translation-result {
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+  padding: 8px 10px;
+  border: 1px solid rgba(111, 168, 144, 0.24);
+  border-radius: 10px;
+  background: rgba(111, 168, 144, 0.08);
+}
+
+.tifo-generated-conversation .qvac-translation-result small,
+.tifo-generated-conversation .qvac-translation-error {
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tifo-generated-conversation .qvac-translation-result p {
+  color: var(--ink-0);
+  font-size: 12.5px;
+}
+
+.tifo-generated-conversation .qvac-translation-error {
+  color: #f0aaa5;
+}
+
 .tifo-generated-conversation .tifo-message-link {
   display: inline;
   padding: 0;

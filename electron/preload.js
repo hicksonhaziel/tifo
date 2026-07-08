@@ -20,6 +20,14 @@ contextBridge.exposeInMainWorld('bridge', {
   },
   setBadgeCount: (count) => ipcRenderer.invoke('app:setBadgeCount', count),
   showNotification: (payload) => ipcRenderer.invoke('app:showNotification', payload),
+  qvacStatus: () => ipcRenderer.invoke('qvac:status'),
+  qvacTranslateText: (payload) => ipcRenderer.invoke('qvac:translateText', payload),
+  qvacUnload: () => ipcRenderer.invoke('qvac:unload'),
+  onQvacProgress: (listener) => {
+    const wrap = (evt, data) => listener(data)
+    ipcRenderer.on('qvac:progress', wrap)
+    return () => ipcRenderer.removeListener('qvac:progress', wrap)
+  },
   startWorker: (specifier) => ipcRenderer.invoke('pear:startWorker', specifier),
   onWorkerStdout: (specifier, listener) => {
     const wrap = (evt, data) => listener(toBuffer(data))

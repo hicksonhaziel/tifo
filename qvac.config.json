@@ -1,0 +1,3 @@
+{
+  "plugins": ["@qvac/sdk/nmtcpp-translation/plugin", "@qvac/sdk/whispercpp-transcription/plugin"]
+}

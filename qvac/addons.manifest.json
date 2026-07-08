@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "bundleId": "80f21b37ee54e9709d29b31ec57f6bc7099b09385c5f311af074a6725d36fd07",
+  "addons": [
+    "@qvac/transcription-whispercpp",
+    "@qvac/translation-nmtcpp",
+    "bare-buffer",
+    "bare-crypto",
+    "bare-dns",
+    "bare-ffmpeg",
+    "bare-fs",
+    "bare-inspect",
+    "bare-os",
+    "bare-path",
+    "bare-pipe",
+    "bare-signals",
+    "bare-tcp",
+    "bare-tls",
+    "bare-type",
+    "bare-url",
+    "bare-zlib",
+    "fs-native-extensions",
+    "quickbit-native",
+    "rabin-native",
+    "rocksdb-native",
+    "simdle-native",
+    "sodium-native",
+    "udx-native"
+  ]
+}

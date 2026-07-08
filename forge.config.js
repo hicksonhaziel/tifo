@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const plink = require('pear-link')
+const QvacForgePlugin = require('@qvac/sdk/electron-forge')
 
 const pkg = require('./package.json')
 const appName = pkg.productName ?? pkg.name
@@ -151,6 +152,9 @@ module.exports = {
   },
 
   plugins: [
+    new QvacForgePlugin({
+      logLevel: 'info'
+    }),
     {
       name: 'electron-forge-plugin-universal-prebuilds',
       config: {}

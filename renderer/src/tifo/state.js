@@ -76,6 +76,15 @@ export function createInitialState(options = {}) {
       voiceError: '',
       voiceStatus: 'idle'
     },
+    qvac: {
+      available: false,
+      error: '',
+      languages: [],
+      lastProgress: '',
+      status: 'idle',
+      targetLanguage: 'en',
+      translations: {}
+    },
     clipDraft: clipDraftIdle(),
     offline: {
       detail: 'Network searching',

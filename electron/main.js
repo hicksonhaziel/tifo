@@ -7,6 +7,7 @@ const FramedStream = require('framed-stream')
 const { isMac, isLinux, isWindows } = require('which-runtime')
 const { command, flag } = require('paparam')
 const pkg = require('../package.json')
+const { createQvacService } = require('./qvac-service')
 const { name, productName, version, upgrade } = pkg
 
 const protocol = name
@@ -59,6 +60,8 @@ function sendToAll(name, data) {
     }
   }
 }
+
+const qvacService = createQvacService({ sendToAll })
 
 function getWorker(specifier) {
   if (workers.has(specifier)) return workers.get(specifier)
@@ -241,6 +244,10 @@ ipcMain.handle('app:setBadgeCount', (evt, count = 0) => {
   return app.setBadgeCount(cleanCount)
 })
 
+ipcMain.handle('qvac:status', () => qvacService.status())
+ipcMain.handle('qvac:translateText', (evt, payload = {}) => qvacService.translateText(payload))
+ipcMain.handle('qvac:unload', () => qvacService.unloadAll())
+
 function handleDeepLink(url) {
   console.log('deep link:', url)
 }
@@ -250,6 +257,7 @@ Menu.setApplicationMenu(null)
 
 app.on('before-quit', () => {
   appIsQuitting = true
+  qvacService.close().catch(() => {})
 })
 
 app.on('open-url', (evt, url) => {
