@@ -1,15 +1,10 @@
 import { roomInviteLabel } from '../../tifo/invites.js'
 import { normalizeUsername } from '../../tifo/identity.js'
 import { unreadCountForRoom } from '../../tifo/notifications.js'
+import { profileAvatarView } from '../../tifo/profile-avatar.js'
 
-export function avatarUrl(seed) {
-  return `https://api.dicebear.com/9.x/notionists/svg?seed=${encodeURIComponent(
-    seed
-  )}&backgroundColor=1a1e22,22272c,2b3137&backgroundType=solid&radius=50`
-}
-
-export function profileAvatarUrl(profile, fallbackSeed = '') {
-  return profile?.avatarDataUrl || avatarUrl(fallbackSeed || profile?.username || 'fan')
+export function profileAvatarUrl(profile) {
+  return profile?.avatarDataUrl || ''
 }
 
 export function knownProfileForKey(state, key) {
@@ -34,14 +29,14 @@ export function knownProfileForEvent(state, event) {
 }
 
 export function profileAvatarForEvent(state, event) {
-  return profileAvatarUrl(
+  return profileAvatarView(
     knownProfileForEvent(state, event),
     event?.senderKey || event?.senderIdentityKey || event?.senderId || event?.sender || 'fan'
   )
 }
 
 export function profileAvatarForName(state, name, fallbackSeed = '') {
-  return profileAvatarUrl(knownProfileForName(state, name), fallbackSeed || name || 'fan')
+  return profileAvatarView(knownProfileForName(state, name), fallbackSeed || name || 'fan')
 }
 
 export function displayName(profile) {
@@ -90,7 +85,7 @@ export function recentChatRows(state) {
 
     return {
       accent: isDm ? '#B87A70' : '#7FA6D1',
-      avatar: isDm ? profileAvatarUrl(dmProfile, `${title}-dm`) : room.avatarDataUrl || '',
+      avatar: isDm ? profileAvatarView(dmProfile, title) : { image: room.avatarDataUrl || '' },
       key: room.code,
       last: unread > 0 ? `${unread} unread` : roomInviteLabel(room),
       room,

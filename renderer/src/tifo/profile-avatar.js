@@ -34,6 +34,38 @@ export async function profileAvatarFromFile(file) {
   }
 }
 
+export function avatarToneForUsername(username) {
+  const tones = [
+    ['#2A3B35', '#131715'],
+    ['#333B4B', '#15171D'],
+    ['#423A32', '#161514'],
+    ['#3B2F38', '#171418'],
+    ['#243B43', '#111719']
+  ]
+  const clean = String(username || 'username').trim() || 'username'
+  const sum = Array.from(clean).reduce((total, char) => total + char.charCodeAt(0), 0)
+  const [from, to] = tones[sum % tones.length]
+  return {
+    background: `linear-gradient(135deg, ${from}, ${to})`
+  }
+}
+
+export function profileAvatarView(profile, fallbackSeed = 'fan') {
+  const seed =
+    profile?.displayName ||
+    profile?.username ||
+    profile?.name ||
+    profile?.title ||
+    fallbackSeed ||
+    'fan'
+  const initial = Array.from(String(seed).replace(/^@+/, '').trim() || 'F')[0].toUpperCase()
+  return {
+    image: typeof profile?.avatarDataUrl === 'string' ? profile.avatarDataUrl : '',
+    initial,
+    style: avatarToneForUsername(seed)
+  }
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const image = new window.Image()

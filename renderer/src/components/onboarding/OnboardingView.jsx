@@ -3,7 +3,7 @@ import { ArrowRight, Camera, Check, Flag, Lock, Users } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
 import { normalizeUsername } from '../../tifo/identity.js'
-import { profileAvatarFromFile } from '../../tifo/profile-avatar.js'
+import { avatarToneForUsername, profileAvatarFromFile } from '../../tifo/profile-avatar.js'
 import tifoLogoLockup from './tifo-logo-lockup.png'
 
 const entrance = {
@@ -278,20 +278,4 @@ function ProfilePreview({
       </div>
     </div>
   )
-}
-
-function avatarToneForUsername(username) {
-  const tones = [
-    ['#2A3B35', '#131715'],
-    ['#333B4B', '#15171D'],
-    ['#423A32', '#161514'],
-    ['#3B2F38', '#171418'],
-    ['#243B43', '#111719']
-  ]
-  const clean = username || 'username'
-  const sum = Array.from(clean).reduce((total, char) => total + char.charCodeAt(0), 0)
-  const [from, to] = tones[sum % tones.length]
-  return {
-    background: `linear-gradient(135deg, ${from}, ${to})`
-  }
 }

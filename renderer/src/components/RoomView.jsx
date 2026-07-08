@@ -99,9 +99,14 @@ function ConversationHeader({
 
   return (
     <div className='content-header'>
-      <div className='conversation-avatar avatar'>
-        {isDm ? (
-          <img alt={title} src={avatar} />
+      <div
+        className='conversation-avatar avatar'
+        style={isDm && !avatar?.image ? avatar?.style : undefined}
+      >
+        {isDm && avatar?.image ? (
+          <img alt={title} src={avatar.image} />
+        ) : isDm ? (
+          <span>{avatar?.initial || title.slice(0, 1).toUpperCase()}</span>
         ) : avatar ? (
           <img alt={title} src={avatar} />
         ) : (

@@ -1201,6 +1201,11 @@
   transform: rotate(45deg);
 }
 
+.tifo-generated-conversation .qvac-toggle.active {
+  background: var(--acc-wash);
+  color: var(--acc-ink);
+}
+
 .tifo-generated-conversation .composer-input {
   flex: 1;
   background: transparent;

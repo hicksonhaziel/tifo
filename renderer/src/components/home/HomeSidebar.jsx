@@ -2,16 +2,10 @@ import { Check, Copy, ImagePlus, Link2, Plus, Trash2, Users } from 'lucide-react
 import { AnimatePresence, motion } from 'framer-motion'
 import { useRef } from 'react'
 
+import { profileAvatarView } from '../../tifo/profile-avatar.js'
 import { BallAvatar } from './BallAvatar.jsx'
 import { MenuButton, SearchInput, TextField } from './HomeSearchInput.jsx'
-import {
-  displayName,
-  profileAvatarUrl,
-  roomRound,
-  roomTitle,
-  searchChats,
-  usernameLabel
-} from './homeModel.js'
+import { displayName, roomRound, roomTitle, searchChats, usernameLabel } from './homeModel.js'
 
 export function HomeSidebar({
   activePanel,
@@ -56,6 +50,7 @@ export function HomeSidebar({
 }) {
   const profile = state.profile
   const username = usernameLabel(profile)
+  const profileAvatar = profileAvatarView(profile, username)
   const filteredChats = searchChats(chats, query)
   const addPanelActive = ['join', 'room', 'create', 'dm'].includes(activePanel)
   const unreadTotal = state.notifications?.unreadCount || 0
@@ -63,8 +58,12 @@ export function HomeSidebar({
   return (
     <aside className='sidebar'>
       <div className='identity'>
-        <div className='avatar'>
-          <img alt={`@${username}`} src={profileAvatarUrl(profile, `${username}-9`)} />
+        <div className='avatar' style={profileAvatar.image ? undefined : profileAvatar.style}>
+          {profileAvatar.image ? (
+            <img alt={`@${username}`} src={profileAvatar.image} />
+          ) : (
+            <span>{profileAvatar.initial}</span>
+          )}
         </div>
         <div className='grow col' style={{ minWidth: 0 }}>
           <div className='row aic between'>
@@ -240,6 +239,8 @@ function SidebarRoom({ active, onClick, onDelete, room }) {
 }
 
 function SidebarChat({ active, onClick, onDelete, row }) {
+  const avatar = row.avatar || {}
+
   return (
     <div
       className={`side-item ${active ? 'active' : ''} ${row.unread > 0 ? 'unread' : ''}`}
@@ -251,8 +252,21 @@ function SidebarChat({ active, onClick, onDelete, row }) {
       tabIndex={0}
     >
       <div className='ico'>
-        {row.avatar ? (
-          <img alt={row.title} src={row.avatar} />
+        {avatar.image ? (
+          <img alt={row.title} src={avatar.image} />
+        ) : row.type === 'dm' ? (
+          <div
+            style={{
+              alignItems: 'center',
+              ...avatar.style,
+              display: 'flex',
+              height: '100%',
+              justifyContent: 'center',
+              width: '100%'
+            }}
+          >
+            <span>{avatar.initial || row.title.slice(0, 1).toUpperCase()}</span>
+          </div>
         ) : (
           <div
             style={{

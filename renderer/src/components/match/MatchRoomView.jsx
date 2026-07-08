@@ -32,9 +32,10 @@ import { InviteModal } from '../conversation/InviteModal.jsx'
 import { ReactionEffects } from '../ReactionEffects.jsx'
 import { ReplayPreview } from '../ReplayPreview.jsx'
 import '../conversation/generatedConversation.css'
+import { profileAvatarView } from '../../tifo/profile-avatar.js'
 import { BallAvatar } from '../home/BallAvatar.jsx'
 import chatBgSharp from '../home/chat-bg-sharp.png'
-import { knownProfileForKey, knownProfileForName, profileAvatarUrl } from '../home/homeModel.js'
+import { knownProfileForKey, knownProfileForName } from '../home/homeModel.js'
 import { ReactionGlyph } from './FlareGlyphs.jsx'
 import './generatedMatch.css'
 
@@ -334,33 +335,39 @@ function timelineTitle(event, meta, reaction) {
 function FansTab({ actions, fans, state }) {
   return (
     <div className='match-fans-list'>
-      {fans.map((fan) => (
-        <div className='match-fan-row' key={fan.id}>
-          <div className='avatar'>
-            <img alt={`@${fan.name}`} src={profileAvatarUrl(fan, fan.key || fan.name)} />
-            <span>{fan.name.slice(0, 1).toUpperCase()}</span>
+      {fans.map((fan) => {
+        const avatar = profileAvatarView(fan, fan.key || fan.name)
+        return (
+          <div className='match-fan-row' key={fan.id}>
+            <div className='avatar' style={avatar.image ? undefined : avatar.style}>
+              {avatar.image ? (
+                <img alt={`@${fan.name}`} src={avatar.image} />
+              ) : (
+                <span>{avatar.initial}</span>
+              )}
+            </div>
+            <div className='col grow'>
+              <span className='match-fan-name'>@{fan.name}</span>
+              <span className='t-xs c-mute'>
+                {fan.self
+                  ? profileLabel(state.profile)
+                  : fan.lastSeen
+                    ? `Active ${formatTime(fan.lastSeen)}`
+                    : 'Known fan'}
+              </span>
+            </div>
+            <button
+              className='btn ghost sm'
+              disabled={fan.self || !fan.key}
+              onClick={() => actions.openDmFromEvent({ sender: fan.name, senderKey: fan.key })}
+              type='button'
+            >
+              <MessageCircle size={12} strokeWidth={2.4} />
+              DM
+            </button>
           </div>
-          <div className='col grow'>
-            <span className='match-fan-name'>@{fan.name}</span>
-            <span className='t-xs c-mute'>
-              {fan.self
-                ? profileLabel(state.profile)
-                : fan.lastSeen
-                  ? `Active ${formatTime(fan.lastSeen)}`
-                  : 'Known fan'}
-            </span>
-          </div>
-          <button
-            className='btn ghost sm'
-            disabled={fan.self || !fan.key}
-            onClick={() => actions.openDmFromEvent({ sender: fan.name, senderKey: fan.key })}
-            type='button'
-          >
-            <MessageCircle size={12} strokeWidth={2.4} />
-            DM
-          </button>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

@@ -66,6 +66,7 @@ export function ChatPanel({
   const [trayOpen, setTrayOpen] = useState(false)
   const [trayTab, setTrayTab] = useState(composerMode === 'match' ? 'flares' : 'media')
   const [quickChantsHidden, setQuickChantsHidden] = useState(false)
+  const [qvacOpen, setQvacOpen] = useState(false)
   const [editingId, setEditingId] = useState('')
   const [editDraft, setEditDraft] = useState('')
   const voiceRecording = state.chatMedia.voiceStatus === 'recording'
@@ -214,7 +215,6 @@ export function ChatPanel({
                 reply={state.chatReply}
               />
             ) : null}
-            <QvacControl actions={actions} qvac={state.qvac} />
             {matchComposer && !quickChantsHidden && !trayOpen && !voiceRecording ? (
               <QuickChants
                 onDismiss={() => setQuickChantsHidden(true)}
@@ -271,6 +271,11 @@ export function ChatPanel({
                   >
                     <SmilePlus size={17} strokeWidth={2.4} />
                   </button>
+                  <QvacToggleButton
+                    className='composer-tool qvac-toggle'
+                    open={qvacOpen}
+                    onToggle={() => setQvacOpen((open) => !open)}
+                  />
                 </>
               )}
               <button
@@ -299,6 +304,7 @@ export function ChatPanel({
                 )}
               </button>
             </form>
+            {qvacOpen ? <QvacControl actions={actions} qvac={state.qvac} /> : null}
             {emojiOpen && !emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
             {trayOpen ? (
               <AttachmentTray
@@ -343,7 +349,6 @@ export function ChatPanel({
           {offlineActive ? 'Offline' : connected ? 'Live sync' : 'Local first'}
         </span>
       </div>
-      <QvacControl actions={actions} qvac={state.qvac} />
       <div className='chat-list' id='chat-list'>
         <ChatItems
           actions={actions}
@@ -394,6 +399,11 @@ export function ChatPanel({
         >
           <SmilePlus size={16} strokeWidth={2.4} />
         </button>
+        <QvacToggleButton
+          className='chat-media-action qvac-toggle'
+          open={qvacOpen}
+          onToggle={() => setQvacOpen((open) => !open)}
+        />
         <button
           className='chat-media-action'
           type='button'
@@ -427,6 +437,7 @@ export function ChatPanel({
           Send
         </button>
       </form>
+      {qvacOpen ? <QvacControl actions={actions} qvac={state.qvac} /> : null}
       {emojiOpen && !emojiTargetId ? <EmojiPickerPopover pickerRef={emojiPickerRef} /> : null}
       <ChatMediaStatus state={state} />
     </section>
@@ -950,9 +961,12 @@ function GeneratedChatItem({
   return (
     <article className={`msg ${status} ${own ? 'own' : ''}`}>
       {!own ? (
-        <div className='avatar'>
-          <img alt={`@${sender}`} src={senderAvatar} />
-          <span>{sender.slice(0, 1).toUpperCase()}</span>
+        <div className='avatar' style={senderAvatar.image ? undefined : senderAvatar.style}>
+          {senderAvatar.image ? (
+            <img alt={`@${sender}`} src={senderAvatar.image} />
+          ) : (
+            <span>{senderAvatar.initial || sender.slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
       ) : null}
       <div className='body'>
@@ -1069,6 +1083,8 @@ function ChatMessageBody({
   state
 }) {
   const translation = state.qvac?.translations?.[event.id] || null
+  const showTranslation =
+    !!translation?.status || shouldOfferQvacTranslation(event, state.qvac?.targetLanguage || 'en')
 
   if (event.type === 'chat') {
     if (editing) {
@@ -1102,12 +1118,14 @@ function ChatMessageBody({
           <TifoLinkText actions={actions} text={event.payload.text} />
           {event.chatState?.editedAt ? <small className='edited-label'>Edited</small> : null}
         </p>
-        <QvacTranslationBlock
-          actions={actions}
-          event={event}
-          qvac={state.qvac}
-          translation={translation}
-        />
+        {showTranslation ? (
+          <QvacTranslationBlock
+            actions={actions}
+            event={event}
+            qvac={state.qvac}
+            translation={translation}
+          />
+        ) : null}
       </>
     )
   }
@@ -1138,7 +1156,7 @@ function ChatMessageBody({
           </button>
         )}
         <small>{formatBytes(payload.size)}</small>
-        {payload.caption ? (
+        {payload.caption && showTranslation ? (
           <QvacTranslationBlock
             actions={actions}
             event={event}
@@ -1173,15 +1191,92 @@ function ChatMessageBody({
   )
 }
 
+function shouldOfferQvacTranslation(event, targetLanguage = 'en') {
+  const text = qvacSourceTextForEvent(event)
+  if (!text) return false
+
+  const target = cleanQvacLanguageCode(targetLanguage) || 'en'
+  const detected = detectQvacLanguage(text, target)
+  if (!detected) return false
+  return detected !== target
+}
+
+function qvacSourceTextForEvent(event) {
+  if (event?.type === 'chat') return String(event.payload?.text || '').trim()
+  if (event?.type === 'chat-media' && event.payload?.kind === 'image') {
+    return String(event.payload?.caption || '').trim()
+  }
+  return ''
+}
+
+function cleanQvacLanguageCode(value) {
+  const language = String(value || '')
+    .trim()
+    .toLowerCase()
+  return /^[a-z]{2}$/.test(language) ? language : ''
+}
+
+function detectQvacLanguage(text, targetLanguage = 'en') {
+  const sample = ` ${String(text || '').toLowerCase()} `
+  if (/[\u0600-\u06ff]/.test(sample)) return 'ar'
+  if (/[\u4e00-\u9fff]/.test(sample)) return 'zh'
+  if (/[\u3040-\u30ff]/.test(sample)) return 'ja'
+  if (/[\uac00-\ud7af]/.test(sample)) return 'ko'
+  if (/[а-яё]/i.test(sample)) return 'ru'
+  if (
+    /[¿¡ñáéíóúü]/i.test(sample) ||
+    qvacHasAny(sample, [' hola ', ' gracias ', ' vamos ', ' gol '])
+  ) {
+    return 'es'
+  }
+  if (
+    /[àâçéèêëîïôûùüÿœ]/i.test(sample) ||
+    qvacHasAny(sample, [' bonjour ', ' merci ', ' allez '])
+  ) {
+    return 'fr'
+  }
+  if (/[ãõ]/i.test(sample) || qvacHasAny(sample, [' obrigado ', ' obrigada ', ' voce '])) {
+    return 'pt'
+  }
+  if (/[äöüß]/i.test(sample) || qvacHasAny(sample, [' danke ', ' bitte ', ' guten '])) return 'de'
+  if (qvacHasAny(sample, [' ciao ', ' grazie ', ' forza '])) return 'it'
+  if (qvacHasAny(sample, [' merhaba ', ' tesekkur ', ' tamam '])) return 'tr'
+  if (targetLanguage !== 'en' && /[a-z]/i.test(sample)) return 'en'
+  return ''
+}
+
+function qvacHasAny(sample, needles) {
+  return needles.some((needle) => sample.includes(needle))
+}
+
+function QvacToggleButton({ className = '', onToggle, open }) {
+  return (
+    <button
+      aria-expanded={open}
+      aria-label='Toggle translation settings'
+      className={`${className} ${open ? 'active' : ''}`.trim()}
+      onClick={onToggle}
+      title='Translation'
+      type='button'
+    >
+      <Languages size={16} strokeWidth={2.4} />
+    </button>
+  )
+}
+
 function QvacControl({ actions, qvac = {} }) {
   const languages = qvac.languages?.length
     ? qvac.languages
     : [
-        { code: 'en', label: 'English' },
-        { code: 'fr', label: 'French' },
-        { code: 'es', label: 'Spanish' },
         { code: 'ar', label: 'Arabic' },
-        { code: 'pt', label: 'Portuguese' }
+        { code: 'de', label: 'German' },
+        { code: 'en', label: 'English' },
+        { code: 'es', label: 'Spanish' },
+        { code: 'fr', label: 'French' },
+        { code: 'it', label: 'Italian' },
+        { code: 'pt', label: 'Portuguese' },
+        { code: 'ru', label: 'Russian' },
+        { code: 'tr', label: 'Turkish' }
       ]
   const statusLabel =
     qvac.status === 'loading'

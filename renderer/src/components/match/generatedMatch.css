@@ -309,14 +309,30 @@
 }
 
 .tifo-generated-match .match-fan-row .avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   height: 34px;
+  overflow: hidden;
   position: relative;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  color: var(--ink-0);
   font-size: 12px;
+  font-weight: 700;
+}
+
+.tifo-generated-match .match-fan-row .avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .tifo-generated-match .match-fan-row .avatar span {
-  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tifo-generated-match .match-fan-name {
