@@ -265,9 +265,7 @@ function sanitizeInvite(invite) {
 
 function invitePayload(invite) {
   const clean = sanitizeInvite(invite)
-  const payload = { ...clean }
-  delete payload.avatarDataUrl
-  return payload
+  return { ...clean }
 }
 
 function normalizeInviteInput(value) {
@@ -283,12 +281,24 @@ function sanitizeRecentRoom(room, profile = null) {
     if (invite.kind === 'match') return null
     return {
       ...invite,
-      invite: typeof room.invite === 'string' ? room.invite : encodeInvite(invite),
+      invite: recentRoomInvite(room, invite),
       lastJoinedAt: Number.isFinite(room.lastJoinedAt) ? room.lastJoinedAt : Date.now(),
       title: invite.kind === 'dm' ? dmTitleForProfile(invite, profile) : invite.title
     }
   } catch {
     return null
+  }
+}
+
+function recentRoomInvite(room, invite) {
+  const storedInvite = typeof room?.invite === 'string' ? room.invite.trim() : ''
+  if (!storedInvite) return encodeInvite(invite)
+
+  try {
+    const stored = parseInvite(storedInvite)
+    return stored.avatarDataUrl === invite.avatarDataUrl ? storedInvite : encodeInvite(invite)
+  } catch {
+    return encodeInvite(invite)
   }
 }
 
